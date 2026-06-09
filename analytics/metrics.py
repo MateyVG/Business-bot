@@ -71,12 +71,20 @@ def growth_rate(df: pd.DataFrame) -> float:
 def profit_by_product(df: pd.DataFrame, costs: pd.DataFrame) -> pd.DataFrame:
     """Печалба по продукт = приход - (себестойност × количество).
 
-    `costs` трябва да има колони: material_id, unit_cost.
+    `costs` трябва да има колони: product_name, channel, unit_cost.
+    Себестойността зависи от канала (на място / доставка), затова свързваме по
+    (product_name, channel), а каналът се определя от is_delivery в продажбите.
     """
     if costs is None or costs.empty:
         return pd.DataFrame(columns=["product_name", "revenue", "cost", "profit", "margin_pct"])
 
-    merged = df.merge(costs[["material_id", "unit_cost"]], on="material_id", how="left")
+    sales = df.copy()
+    sales["channel"] = np.where(sales.get("is_delivery", False), "delivery", "onsite")
+
+    costs = costs[["product_name", "channel", "unit_cost"]].copy()
+    costs["unit_cost"] = pd.to_numeric(costs["unit_cost"], errors="coerce")
+
+    merged = sales.merge(costs, on=["product_name", "channel"], how="left")
     merged["cost"] = merged["unit_cost"].fillna(0) * merged["quantity"]
     g = merged.groupby("product_name").agg(
         revenue=("amount", "sum"), cost=("cost", "sum")
@@ -86,3 +94,27 @@ def profit_by_product(df: pd.DataFrame, costs: pd.DataFrame) -> pd.DataFrame:
         g["revenue"] != 0, (g["profit"] / g["revenue"] * 100).round(1), 0.0
     )
     return g.sort_values("profit", ascending=False)
+
+
+def missing_costs(df: pd.DataFrame, costs: pd.DataFrame) -> pd.DataFrame:
+    """Продукти (по канал), които имат продажби, но НЯМАТ себестойност.
+
+    Връща product_name, channel + сумарни quantity и revenue, сортирани по
+    оборот (за да се вижда кои липсващи цени тежат най-много). Без тях
+    печалбата за тези продукти излиза подвеждащо висока (марж ~100%).
+    """
+    sales = df.copy()
+    sales["channel"] = np.where(sales.get("is_delivery", False), "delivery", "onsite")
+    agg = (
+        sales.groupby(["product_name", "channel"])
+        .agg(quantity=("quantity", "sum"), revenue=("amount", "sum"))
+        .reset_index()
+    )
+    if costs is None or costs.empty:
+        return agg.sort_values("revenue", ascending=False).reset_index(drop=True)
+
+    have = costs[["product_name", "channel"]].drop_duplicates()
+    have["_has"] = True
+    m = agg.merge(have, on=["product_name", "channel"], how="left")
+    missing = m[m["_has"].isna()].drop(columns="_has")
+    return missing.sort_values("revenue", ascending=False).reset_index(drop=True)

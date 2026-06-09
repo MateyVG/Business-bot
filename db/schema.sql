@@ -29,12 +29,15 @@ create index if not exists idx_sales_object   on sales (object_name);
 create index if not exists idx_sales_category on sales (category);
 create index if not exists idx_sales_delivery on sales (is_delivery);
 
--- ===== Себестойности на продуктите =====
+-- ===== Себестойности на продуктите (по канал) =====
+-- Себестойността на един и същ продукт се различава на място vs доставка,
+-- затова ключът е (product_name, channel). Връзката към sales е по име.
 create table if not exists product_costs (
-    material_id   bigint primary key,   -- връзка към sales.material_id
-    product_name  text,
-    unit_cost     numeric,              -- себестойност за единица
-    updated_at    timestamptz default now()
+    product_name  text not null,        -- връзка към sales.product_name
+    channel       text not null,        -- 'onsite' (на място) | 'delivery' (доставка)
+    unit_cost     numeric,              -- себестойност за единица (с ДДС)
+    updated_at    timestamptz default now(),
+    primary key (product_name, channel)
 );
 
 -- ===== Синоптични данни (за корелация време <-> оборот) =====

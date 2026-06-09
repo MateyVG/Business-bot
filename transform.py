@@ -56,6 +56,70 @@ def transform(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _norm_header(name: object) -> str:
+    """Привежда заглавие на колона към сравним вид: без интервали, точки и
+    главни букви (за гъвкаво разпознаване на Excel колоните)."""
+    s = re.sub(r"\s+", "", str(name)).lower()
+    return s.replace(".", "").replace("№", "no")
+
+
+def _resolve_columns(df: pd.DataFrame, aliases: dict[str, list[str]]) -> dict[str, str]:
+    """Намира за всяка целева колона коя реална Excel колона ѝ съответства.
+
+    Връща map {реално_заглавие: целево_име}, годен за df.rename(columns=...).
+    """
+    found = {_norm_header(c): c for c in df.columns}
+    mapping = {}
+    for target, names in aliases.items():
+        for name in names:
+            real = found.get(_norm_header(name))
+            if real is not None:
+                mapping[real] = target
+                break
+    return mapping
+
+
+def transform_costs(df: pd.DataFrame, channel: str) -> pd.DataFrame:
+    """Сурова Excel таблица със себестойности (един лист) -> чист DataFrame.
+
+    Очаквани (целеви) колони: product_name, unit_cost. Реалните заглавия се
+    разпознават гъвкаво чрез config.COST_COLUMN_ALIASES. Десетичните стойности
+    със запетая ("1,50") се приемат коректно.
+
+    `channel` маркира канала ('onsite' / 'delivery'), защото себестойността на
+    един и същ продукт се различава на място спрямо доставка. Свързването с
+    продажбите после е по (product_name, channel), а каналът идва от is_delivery.
+    """
+    df = df.rename(columns=_resolve_columns(df, config.COST_COLUMN_ALIASES)).copy()
+
+    missing = {"product_name", "unit_cost"} - set(df.columns)
+    if missing:
+        raise ValueError(
+            f"Липсват задължителни колони {sorted(missing)}. "
+            f"Намерени заглавия в Excel: {list(df.columns)}. "
+            f"Добави подходящ псевдоним в config.COST_COLUMN_ALIASES."
+        )
+
+    df = df[["product_name", "unit_cost"]].copy()
+    df["product_name"] = df["product_name"].map(_norm_object)
+    df["unit_cost"] = pd.to_numeric(
+        df["unit_cost"].astype(str).str.replace(",", ".", regex=False).str.strip(),
+        errors="coerce",
+    )
+
+    # Без име продуктът е безполезен (връзката към sales е по име)
+    df = df.dropna(subset=["product_name"])
+    df = df[df["product_name"].astype(str).str.strip() != ""]
+    df["channel"] = channel
+    # При дубликати на име в един лист пазим последния (приемаме го за актуален)
+    df = df.drop_duplicates(subset=["product_name"], keep="last")
+
+    # Маркер кога е обновена цената (product_costs.updated_at се пази при upsert)
+    df["updated_at"] = pd.Timestamp.now(tz="UTC").isoformat()
+
+    return df.reset_index(drop=True)
+
+
 def to_records(df: pd.DataFrame) -> list[dict]:
     """DataFrame -> списък записи, годни за Supabase (JSON-safe)."""
     out = []
