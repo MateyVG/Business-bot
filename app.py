@@ -10,8 +10,10 @@ from analytics import metrics
 from analytics.data import load_costs, load_sales
 from analytics.forecast import forecast_revenue
 from db.costs_repo import upsert_costs
+from db.sales_repo import insert_sales, replace_all_sales
 from db.supabase_client import has_service_key
 from ingest.load_costs import read_costs_excel
+from ingest.load_excel import read_sales_excel
 
 st.set_page_config(page_title="Бизнес Анализатор", page_icon="📊", layout="wide")
 
@@ -45,8 +47,8 @@ objects = ["Всички обекти"] + sorted(df_all["object_name"].dropna().
 chosen = st.sidebar.selectbox("Обект", objects)
 df = df_all if chosen == "Всички обекти" else df_all[df_all["object_name"] == chosen]
 
-tab_dash, tab_costs, tab_chat = st.tabs(
-    ["📈 Табло", "💰 Себестойности", "💬 Чат с асистента"]
+tab_dash, tab_sales, tab_costs, tab_chat = st.tabs(
+    ["📈 Табло", "⬆️ Продажби", "💰 Себестойности", "💬 Чат с асистента"]
 )
 
 with tab_dash:
@@ -96,9 +98,72 @@ with tab_dash:
 
 
 def _refresh():
-    """Изчиства кеша и презарежда, за да се видят новите себестойности."""
+    """Изчиства кеша и презарежда, за да се видят новокачените данни."""
+    get_data.clear()
     get_costs.clear()
     st.rerun()
+
+
+with tab_sales:
+    if not has_service_key():
+        st.warning(
+            "⚠️ За качване е нужен **service_role** ключ. Добави "
+            "`SUPABASE_SERVICE_KEY` в Streamlit secrets (при деплой) или в "
+            "`.env` (локално). Без него можеш само да преглеждаш данните."
+        )
+    can_write = has_service_key()
+
+    st.subheader("⬆️ Качване на продажби (Excel)")
+    st.caption(
+        "Суров експорт с колоните от касовата система (Oбект, Номер, "
+        "Дата и час, Мат. №, Стойност, Партньор...). Файлът се обработва "
+        "автоматично (работен ден, доставка, връщане)."
+    )
+    up = st.file_uploader("Избери .xlsx файл", type=["xlsx"], key="sales_upload")
+    if up is not None:
+        try:
+            parsed = read_sales_excel(up)
+            bdates = parsed["business_date"].dropna()
+            period = (
+                f"{bdates.min()} – {bdates.max()}" if not bdates.empty else "—"
+            )
+            st.write(
+                f"Разпознати **{len(parsed)}** реда · работни дни: **{period}**"
+            )
+            st.dataframe(parsed.head(50), use_container_width=True, hide_index=True)
+
+            mode = st.radio(
+                "Режим на качване",
+                ["Добави към съществуващите", "Замести всички продажби"],
+                help=(
+                    "„Добави\" вкарва редовете към текущите (внимавай с дубликати "
+                    "при повторно качване на същия файл). „Замести\" първо изтрива "
+                    "всички стари продажби, после вкарва тези."
+                ),
+            )
+            replace = mode.startswith("Замести")
+            confirm = True
+            if replace:
+                confirm = st.checkbox(
+                    "Потвърждавам, че ще изтрия всички досегашни продажби", value=False
+                )
+
+            if st.button(
+                "Качи в Supabase",
+                type="primary",
+                disabled=not (can_write and confirm),
+                key="sales_upload_btn",
+            ):
+                with st.spinner("Качвам..."):
+                    n = (
+                        replace_all_sales(parsed)
+                        if replace
+                        else insert_sales(parsed)
+                    )
+                st.success(f"Готово! {'Заменени' if replace else 'Добавени'} {n} реда.")
+                _refresh()
+        except Exception as e:  # noqa: BLE001
+            st.error(f"Проблем с файла или качването: {e}")
 
 
 with tab_costs:
