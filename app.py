@@ -126,7 +126,7 @@ with tab_dash:
     # --- Време и оборот ---
     st.subheader("Време и оборот")
     cities = sorted(set(config.OBJECT_CITY.values()))
-    default_city = config.OBJECT_CITY.get(chosen) if chosen != "Всички обекти" else None
+    default_city = config.city_for(chosen) if chosen != "Всички обекти" else None
     idx = cities.index(default_city) if default_city in cities else 0
 
     wc1, wc2 = st.columns([3, 1])
@@ -157,8 +157,8 @@ with tab_dash:
             "(иска service_role ключ и изходящ интернет)."
         )
     else:
-        objs = [o for o, c in config.OBJECT_CITY.items() if c == city]
-        daily = metrics.revenue_by_business_day(df_all[df_all["object_name"].isin(objs)])
+        in_city = df_all["object_name"].map(lambda n: config.city_for(n) == city)
+        daily = metrics.revenue_by_business_day(df_all[in_city])
         merged = correlate_with_sales(daily, wcity)
         if merged.empty:
             st.info("Няма припокриване между продажбите и времето за този град.")
