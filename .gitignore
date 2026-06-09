@@ -23,3 +23,8 @@ _preview_demo.py
 .DS_Store
 .vscode/
 .idea/
+
+# Локални scratch / генерирани артефакти (демо преглед)
+_preview_demo.py
+_smoke_test.py
+preview.html

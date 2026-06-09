@@ -29,7 +29,10 @@ st.markdown(theme.css(), unsafe_allow_html=True)
 
 @st.cache_data(ttl=300)
 def get_data():
-    return load_sales()
+    try:
+        return load_sales()
+    except Exception:
+        return pd.DataFrame()
 
 
 @st.cache_data(ttl=300)
