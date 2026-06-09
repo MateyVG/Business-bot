@@ -56,6 +56,69 @@ def transform(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _norm_header(name: object) -> str:
+    """Привежда заглавие на колона към сравним вид: без интервали, точки и
+    главни букви (за гъвкаво разпознаване на Excel колоните)."""
+    s = re.sub(r"\s+", "", str(name)).lower()
+    return s.replace(".", "").replace("№", "no")
+
+
+def _resolve_columns(df: pd.DataFrame, aliases: dict[str, list[str]]) -> dict[str, str]:
+    """Намира за всяка целева колона коя реална Excel колона ѝ съответства.
+
+    Връща map {реално_заглавие: целево_име}, годен за df.rename(columns=...).
+    """
+    found = {_norm_header(c): c for c in df.columns}
+    mapping = {}
+    for target, names in aliases.items():
+        for name in names:
+            real = found.get(_norm_header(name))
+            if real is not None:
+                mapping[real] = target
+                break
+    return mapping
+
+
+def transform_costs(df: pd.DataFrame) -> pd.DataFrame:
+    """Сурова Excel таблица със себестойности -> чист DataFrame за product_costs.
+
+    Очаквани (целеви) колони: material_id, unit_cost и по желание product_name.
+    Реалните заглавия се разпознават гъвкаво чрез config.COST_COLUMN_ALIASES.
+    Десетичните стойности с запетая ("1,50") се приемат коректно.
+    """
+    df = df.rename(columns=_resolve_columns(df, config.COST_COLUMN_ALIASES)).copy()
+
+    missing = {"material_id", "unit_cost"} - set(df.columns)
+    if missing:
+        raise ValueError(
+            f"Липсват задължителни колони {sorted(missing)}. "
+            f"Намерени заглавия в Excel: {list(df.columns)}. "
+            f"Добави подходящ псевдоним в config.COST_COLUMN_ALIASES."
+        )
+
+    keep = [c for c in ("material_id", "product_name", "unit_cost") if c in df]
+    df = df[keep].copy()
+
+    df["material_id"] = pd.to_numeric(df["material_id"], errors="coerce")
+    df["unit_cost"] = pd.to_numeric(
+        df["unit_cost"].astype(str).str.replace(",", ".", regex=False).str.strip(),
+        errors="coerce",
+    )
+    if "product_name" in df:
+        df["product_name"] = df["product_name"].map(_norm_object)
+
+    # Без валиден Мат. № записът е безполезен (връзката към sales е по material_id)
+    df = df.dropna(subset=["material_id"])
+    df["material_id"] = df["material_id"].astype("int64")
+    # При дубликати пазим последния ред (приемаме го за най-актуален)
+    df = df.drop_duplicates(subset=["material_id"], keep="last")
+
+    # Маркер кога е обновена цената (product_costs.updated_at се пази при upsert)
+    df["updated_at"] = pd.Timestamp.now(tz="UTC").isoformat()
+
+    return df.reset_index(drop=True)
+
+
 def to_records(df: pd.DataFrame) -> list[dict]:
     """DataFrame -> списък записи, годни за Supabase (JSON-safe)."""
     out = []
