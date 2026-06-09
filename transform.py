@@ -79,16 +79,20 @@ def _resolve_columns(df: pd.DataFrame, aliases: dict[str, list[str]]) -> dict[st
     return mapping
 
 
-def transform_costs(df: pd.DataFrame) -> pd.DataFrame:
-    """Сурова Excel таблица със себестойности -> чист DataFrame за product_costs.
+def transform_costs(df: pd.DataFrame, channel: str) -> pd.DataFrame:
+    """Сурова Excel таблица със себестойности (един лист) -> чист DataFrame.
 
-    Очаквани (целеви) колони: material_id, unit_cost и по желание product_name.
-    Реалните заглавия се разпознават гъвкаво чрез config.COST_COLUMN_ALIASES.
-    Десетичните стойности с запетая ("1,50") се приемат коректно.
+    Очаквани (целеви) колони: product_name, unit_cost. Реалните заглавия се
+    разпознават гъвкаво чрез config.COST_COLUMN_ALIASES. Десетичните стойности
+    със запетая ("1,50") се приемат коректно.
+
+    `channel` маркира канала ('onsite' / 'delivery'), защото себестойността на
+    един и същ продукт се различава на място спрямо доставка. Свързването с
+    продажбите после е по (product_name, channel), а каналът идва от is_delivery.
     """
     df = df.rename(columns=_resolve_columns(df, config.COST_COLUMN_ALIASES)).copy()
 
-    missing = {"material_id", "unit_cost"} - set(df.columns)
+    missing = {"product_name", "unit_cost"} - set(df.columns)
     if missing:
         raise ValueError(
             f"Липсват задължителни колони {sorted(missing)}. "
@@ -96,22 +100,19 @@ def transform_costs(df: pd.DataFrame) -> pd.DataFrame:
             f"Добави подходящ псевдоним в config.COST_COLUMN_ALIASES."
         )
 
-    keep = [c for c in ("material_id", "product_name", "unit_cost") if c in df]
-    df = df[keep].copy()
-
-    df["material_id"] = pd.to_numeric(df["material_id"], errors="coerce")
+    df = df[["product_name", "unit_cost"]].copy()
+    df["product_name"] = df["product_name"].map(_norm_object)
     df["unit_cost"] = pd.to_numeric(
         df["unit_cost"].astype(str).str.replace(",", ".", regex=False).str.strip(),
         errors="coerce",
     )
-    if "product_name" in df:
-        df["product_name"] = df["product_name"].map(_norm_object)
 
-    # Без валиден Мат. № записът е безполезен (връзката към sales е по material_id)
-    df = df.dropna(subset=["material_id"])
-    df["material_id"] = df["material_id"].astype("int64")
-    # При дубликати пазим последния ред (приемаме го за най-актуален)
-    df = df.drop_duplicates(subset=["material_id"], keep="last")
+    # Без име продуктът е безполезен (връзката към sales е по име)
+    df = df.dropna(subset=["product_name"])
+    df = df[df["product_name"].astype(str).str.strip() != ""]
+    df["channel"] = channel
+    # При дубликати на име в един лист пазим последния (приемаме го за актуален)
+    df = df.drop_duplicates(subset=["product_name"], keep="last")
 
     # Маркер кога е обновена цената (product_costs.updated_at се пази при upsert)
     df["updated_at"] = pd.Timestamp.now(tz="UTC").isoformat()

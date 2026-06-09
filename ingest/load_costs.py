@@ -1,16 +1,17 @@
 """Качване на себестойности на продуктите в Supabase (таблица product_costs).
 
-Очаква Excel със себестойности. Заглавията се разпознават гъвкаво
-(виж config.COST_COLUMN_ALIASES), но по същество трябват:
-    Мат. №            -> material_id   (връзка към sales.material_id)
-    Себестойност      -> unit_cost     (себестойност за единица)
-    Име на материал   -> product_name  (по желание)
+Excel-ът има по един лист на канал (виж config.COST_SHEET_CHANNELS):
+    "Обекти"   -> onsite    (продажба на място)
+    "Доставки" -> delivery  (доставка по домовете)
+Всеки лист има колони:
+    Артикул               -> product_name  (връзка към sales.product_name)
+    Обща стойност с ДДС   -> unit_cost      (себестойност за единица)
 
 Употреба:
     python -m ingest.load_costs path/to/себестойности.xlsx
 
-Ползва upsert по material_id, така че повторно качване ОБНОВЯВА цените,
-без да дублира редове. Нужен е service_role ключ (заобикаля RLS).
+Ползва upsert по (product_name, channel), така че повторно качване ОБНОВЯВА
+цените, без да дублира редове. Нужен е service_role ключ (заобикаля RLS).
 """
 import argparse
 
@@ -22,8 +23,20 @@ from transform import to_records, transform_costs
 
 
 def load_costs(path: str, batch_size: int = 500) -> int:
-    raw = pd.read_excel(path)
-    df = transform_costs(raw)
+    xl = pd.ExcelFile(path)
+
+    frames = []
+    for sheet, channel in config.COST_SHEET_CHANNELS.items():
+        if sheet in xl.sheet_names:
+            frames.append(transform_costs(pd.read_excel(xl, sheet_name=sheet), channel))
+            print(f"  лист '{sheet}' -> канал '{channel}': {len(frames[-1])} реда")
+
+    # Резервен вариант: ако очакваните листове ги няма, ползваме първия като onsite.
+    if not frames:
+        frames.append(transform_costs(pd.read_excel(xl, xl.sheet_names[0]), "onsite"))
+        print(f"  (резервно) лист '{xl.sheet_names[0]}' -> 'onsite'")
+
+    df = pd.concat(frames, ignore_index=True)
     records = to_records(df)
 
     client = get_client(use_service_key=True)
