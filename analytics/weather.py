@@ -10,6 +10,7 @@ WMO weather_code: 0=ясно, 1-3=облачно, 45-48=мъгла, 51-67=дъж
 """
 import datetime as dt
 
+import numpy as np
 import pandas as pd
 import requests
 
@@ -96,3 +97,75 @@ def correlate_with_sales(daily_sales: pd.DataFrame, weather: pd.DataFrame) -> pd
         merged.attrs["corr_temp"] = merged["revenue"].corr(merged["temp_max"])
         merged.attrs["corr_rain"] = merged["revenue"].corr(merged["precipitation"])
     return merged
+
+
+def _round(x) -> float | None:
+    """Закръгля, но връща None при NaN (за чист JSON към модела)."""
+    return None if x is None or x != x else round(float(x), 2)
+
+
+def weather_insights(sales: pd.DataFrame, weather: pd.DataFrame,
+                     rain_mm: float = 1.0) -> dict:
+    """Свързва продажбите с времето по регион и ден и връща изводи за модела.
+
+    Връща речник с:
+      * rainy_vs_dry — среден оборот и дял доставки в дъждовни vs сухи дни
+      * by_region — корелации оборот↔температура и оборот↔валежи по регион
+    Така чат асистентът може да дава съвети тип „при дъжд доставките скачат".
+    """
+    if sales is None or sales.empty or weather is None or weather.empty:
+        return {}
+
+    s = sales.copy()
+    s["region"] = s["object_name"].map(config.city_for)
+    s = s.dropna(subset=["region", "business_date"])
+    if s.empty:
+        return {}
+
+    s["deliv_amt"] = np.where(s.get("is_delivery", False), s["amount"], 0.0)
+    daily = (
+        s.groupby(["region", "business_date"])
+        .agg(revenue=("amount", "sum"), deliv=("deliv_amt", "sum"))
+        .reset_index()
+    )
+    daily["delivery_share"] = np.where(
+        daily["revenue"] != 0, daily["deliv"] / daily["revenue"] * 100, 0.0
+    )
+    daily["business_date"] = pd.to_datetime(daily["business_date"]).dt.date
+
+    w = weather.rename(columns={"city": "region", "day": "business_date"})[
+        ["region", "business_date", "temp_max", "precipitation"]
+    ].copy()
+    w["business_date"] = pd.to_datetime(w["business_date"]).dt.date
+
+    m = daily.merge(w, on=["region", "business_date"], how="inner")
+    if m.empty:
+        return {}
+
+    rainy = m[m["precipitation"] > rain_mm]
+    dry = m[m["precipitation"] <= rain_mm]
+
+    def avg(frame, col):
+        return _round(frame[col].mean()) if len(frame) else None
+
+    rainy_vs_dry = {
+        "rain_threshold_mm": rain_mm,
+        "rainy_days": int(len(rainy)),
+        "dry_days": int(len(dry)),
+        "avg_revenue_rainy": avg(rainy, "revenue"),
+        "avg_revenue_dry": avg(dry, "revenue"),
+        "delivery_share_rainy_pct": avg(rainy, "delivery_share"),
+        "delivery_share_dry_pct": avg(dry, "delivery_share"),
+    }
+
+    by_region = []
+    for region, g in m.groupby("region"):
+        if len(g) >= 3:
+            by_region.append({
+                "region": region,
+                "days": int(len(g)),
+                "corr_temp": _round(g["revenue"].corr(g["temp_max"])),
+                "corr_rain": _round(g["revenue"].corr(g["precipitation"])),
+            })
+
+    return {"rainy_vs_dry": rainy_vs_dry, "by_region": by_region}
