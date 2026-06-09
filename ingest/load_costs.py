@@ -18,35 +18,31 @@ import argparse
 import pandas as pd
 
 import config
-from db.supabase_client import get_client
-from transform import to_records, transform_costs
+from db.costs_repo import upsert_costs
+from transform import transform_costs
 
 
-def load_costs(path: str, batch_size: int = 500) -> int:
-    xl = pd.ExcelFile(path)
+def read_costs_excel(source) -> pd.DataFrame:
+    """Чете Excel (път или файлов обект) и връща обединените себестойности.
 
+    Преминава през всеки познат лист и му слага съответния канал. Ако нито
+    един от очакваните листове не е намерен, ползва първия като 'onsite'.
+    """
+    xl = pd.ExcelFile(source)
     frames = []
     for sheet, channel in config.COST_SHEET_CHANNELS.items():
         if sheet in xl.sheet_names:
             frames.append(transform_costs(pd.read_excel(xl, sheet_name=sheet), channel))
-            print(f"  лист '{sheet}' -> канал '{channel}': {len(frames[-1])} реда")
-
-    # Резервен вариант: ако очакваните листове ги няма, ползваме първия като onsite.
     if not frames:
         frames.append(transform_costs(pd.read_excel(xl, xl.sheet_names[0]), "onsite"))
-        print(f"  (резервно) лист '{xl.sheet_names[0]}' -> 'onsite'")
+    return pd.concat(frames, ignore_index=True)
 
-    df = pd.concat(frames, ignore_index=True)
-    records = to_records(df)
 
-    client = get_client(use_service_key=True)
-    total = 0
-    for i in range(0, len(records), batch_size):
-        batch = records[i : i + batch_size]
-        client.table(config.COSTS_TABLE).upsert(batch).execute()
-        total += len(batch)
-        print(f"  качени {total}/{len(records)} реда...")
-    return total
+def load_costs(path: str, batch_size: int = 500) -> int:
+    df = read_costs_excel(path)
+    print(f"  прочетени {len(df)} реда от Excel-а...")
+    n = upsert_costs(df, batch_size)
+    return n
 
 
 if __name__ == "__main__":

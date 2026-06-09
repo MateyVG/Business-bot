@@ -29,3 +29,11 @@ def get_client(use_service_key: bool = False) -> Client:
     else:
         key = anon
     return create_client(url, key)
+
+
+def has_service_key() -> bool:
+    """Има ли service_role ключ — т.е. дали приложението може да ПИШЕ в базата.
+
+    Без него writes-ите (качване/редакция на себестойности) ще се отрежат от RLS.
+    """
+    return bool(os.environ.get("SUPABASE_SERVICE_KEY"))

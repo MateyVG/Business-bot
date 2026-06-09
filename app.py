@@ -2,12 +2,16 @@
 
 Стартиране:  streamlit run app.py
 """
+import pandas as pd
 import plotly.express as px
 import streamlit as st
 
 from analytics import metrics
 from analytics.data import load_costs, load_sales
 from analytics.forecast import forecast_revenue
+from db.costs_repo import upsert_costs
+from db.supabase_client import has_service_key
+from ingest.load_costs import read_costs_excel
 
 st.set_page_config(page_title="Бизнес Анализатор", page_icon="📊", layout="wide")
 
@@ -22,28 +26,28 @@ def get_costs():
     try:
         return load_costs()
     except Exception:
-        import pandas as pd
         return pd.DataFrame()
 
 
 st.title("📊 Бизнес Анализатор")
-df = get_data()
+df_all = get_data()
 costs = get_costs()
 
-if df.empty:
+if df_all.empty:
     st.warning(
         "Няма данни. Качи Excel с:  "
         "`python -m ingest.load_excel файл.xlsx`"
     )
     st.stop()
 
-# --- Филтър по обект ---
-objects = ["Всички обекти"] + sorted(df["object_name"].dropna().unique().tolist())
+# --- Филтър по обект (важи за таблото и чата, не за управлението на цените) ---
+objects = ["Всички обекти"] + sorted(df_all["object_name"].dropna().unique().tolist())
 chosen = st.sidebar.selectbox("Обект", objects)
-if chosen != "Всички обекти":
-    df = df[df["object_name"] == chosen]
+df = df_all if chosen == "Всички обекти" else df_all[df_all["object_name"] == chosen]
 
-tab_dash, tab_chat = st.tabs(["📈 Табло", "💬 Чат с асистента"])
+tab_dash, tab_costs, tab_chat = st.tabs(
+    ["📈 Табло", "💰 Себестойности", "💬 Чат с асистента"]
+)
 
 with tab_dash:
     deliv = metrics.delivery_split(df)
@@ -89,6 +93,102 @@ with tab_dash:
     if not costs.empty:
         st.subheader("Печалба по продукт")
         st.dataframe(metrics.profit_by_product(df, costs), use_container_width=True)
+
+
+def _refresh():
+    """Изчиства кеша и презарежда, за да се видят новите себестойности."""
+    get_costs.clear()
+    st.rerun()
+
+
+with tab_costs:
+    if not has_service_key():
+        st.warning(
+            "⚠️ За качване и редакция е нужен **service_role** ключ. Добави "
+            "`SUPABASE_SERVICE_KEY` в `.env` (локално) или в Streamlit secrets "
+            "(при деплой). Без него можеш само да преглеждаш."
+        )
+    can_write = has_service_key()
+
+    # --- Липсващи себестойности (продукти с продажби, но без цена) ---
+    st.subheader("⚠️ Продукти без себестойност")
+    missing = metrics.missing_costs(df_all, costs)
+    if missing.empty:
+        st.success("Всички продавани продукти имат себестойност. 👌")
+    else:
+        st.caption(
+            f"{len(missing)} комбинации продукт×канал нямат себестойност — "
+            "печалбата им излиза подвеждащо висока. Добави ги в таблицата по-долу."
+        )
+        st.dataframe(missing, use_container_width=True, hide_index=True)
+
+    st.divider()
+
+    # --- Качване на Excel със себестойности ---
+    st.subheader("📤 Качване на Excel")
+    st.caption(
+        "Файл с лист Обекти (на място) и лист Доставки — колони "
+        "Артикул и Обща стойност с ДДС."
+    )
+    up = st.file_uploader("Избери .xlsx файл", type=["xlsx"], key="costs_upload")
+    if up is not None:
+        try:
+            parsed = read_costs_excel(up)
+            st.write(f"Разпознати **{len(parsed)}** реда:")
+            st.dataframe(parsed, use_container_width=True, hide_index=True, height=240)
+            if st.button("Качи в Supabase", type="primary", disabled=not can_write):
+                with st.spinner("Качвам..."):
+                    n = upsert_costs(parsed)
+                st.success(f"Качени/обновени {n} реда.")
+                _refresh()
+        except Exception as e:  # noqa: BLE001
+            st.error(f"Проблем с файла: {e}")
+
+    st.divider()
+
+    # --- Редакция на съществуващите себестойности ---
+    st.subheader("✏️ Редакция на себестойностите")
+    base = costs.copy()
+    if base.empty:
+        base = pd.DataFrame(columns=["product_name", "channel", "unit_cost"])
+    edited = st.data_editor(
+        base[["product_name", "channel", "unit_cost"]]
+        if not base.empty else base,
+        num_rows="dynamic",
+        use_container_width=True,
+        hide_index=True,
+        disabled=not can_write,
+        column_config={
+            "product_name": st.column_config.TextColumn("Продукт", required=True),
+            "channel": st.column_config.SelectboxColumn(
+                "Канал", options=["onsite", "delivery"], required=True
+            ),
+            "unit_cost": st.column_config.NumberColumn(
+                "Себестойност", min_value=0.0, step=0.01, format="%.4f"
+            ),
+        },
+        key="costs_editor",
+    )
+    if st.button("Запази промените", type="primary", disabled=not can_write):
+        clean = edited.copy()
+        clean["product_name"] = clean["product_name"].astype(str).str.strip()
+        clean = clean[
+            (clean["product_name"] != "")
+            & clean["channel"].isin(["onsite", "delivery"])
+        ]
+        clean["unit_cost"] = pd.to_numeric(clean["unit_cost"], errors="coerce")
+        clean = clean.drop_duplicates(subset=["product_name", "channel"], keep="last")
+        clean["updated_at"] = pd.Timestamp.now(tz="UTC").isoformat()
+        if clean.empty:
+            st.warning("Няма валидни редове за запис.")
+        else:
+            try:
+                with st.spinner("Запазвам..."):
+                    n = upsert_costs(clean)
+                st.success(f"Запазени {n} реда.")
+                _refresh()
+            except Exception as e:  # noqa: BLE001
+                st.error(f"Проблем при запис: {e}")
 
 with tab_chat:
     st.caption("Питай за продажбите, доставките, маркетинга, прогнозите...")

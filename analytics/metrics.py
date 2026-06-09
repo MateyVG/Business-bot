@@ -94,3 +94,27 @@ def profit_by_product(df: pd.DataFrame, costs: pd.DataFrame) -> pd.DataFrame:
         g["revenue"] != 0, (g["profit"] / g["revenue"] * 100).round(1), 0.0
     )
     return g.sort_values("profit", ascending=False)
+
+
+def missing_costs(df: pd.DataFrame, costs: pd.DataFrame) -> pd.DataFrame:
+    """Продукти (по канал), които имат продажби, но НЯМАТ себестойност.
+
+    Връща product_name, channel + сумарни quantity и revenue, сортирани по
+    оборот (за да се вижда кои липсващи цени тежат най-много). Без тях
+    печалбата за тези продукти излиза подвеждащо висока (марж ~100%).
+    """
+    sales = df.copy()
+    sales["channel"] = np.where(sales.get("is_delivery", False), "delivery", "onsite")
+    agg = (
+        sales.groupby(["product_name", "channel"])
+        .agg(quantity=("quantity", "sum"), revenue=("amount", "sum"))
+        .reset_index()
+    )
+    if costs is None or costs.empty:
+        return agg.sort_values("revenue", ascending=False).reset_index(drop=True)
+
+    have = costs[["product_name", "channel"]].drop_duplicates()
+    have["_has"] = True
+    m = agg.merge(have, on=["product_name", "channel"], how="left")
+    missing = m[m["_has"].isna()].drop(columns="_has")
+    return missing.sort_values("revenue", ascending=False).reset_index(drop=True)
