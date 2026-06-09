@@ -15,6 +15,10 @@ data/
 *.xls
 *.csv
 
+# Локални демо/преглед артефакти (не са част от приложението)
+preview.html
+_preview_demo.py
+
 # OS / IDE
 .DS_Store
 .vscode/
