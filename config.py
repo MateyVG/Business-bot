@@ -1,5 +1,19 @@
 """Централна конфигурация — нагласена спрямо реалния Excel формат."""
 
+# --- Supabase връзка (ПУБЛИЧНИ стойности — само за ЧЕТЕНЕ) ---
+# anon ключът е защитен от Row Level Security (само SELECT по схемата),
+# затова е безопасно да стои в repo-то и приложението да чете още след клониране.
+# Стойностите от .env (ако има) имат приоритет пред тези по подразбиране.
+# ⚠️ ТАЙНИТЕ ключове (service_role за качване, OPENAI_API_KEY) НИКОГА не влизат
+#    тук — само в локалния .env, който е в .gitignore.
+SUPABASE_URL = "https://lvgdvibtcyhpoyuyqyln.supabase.co"
+SUPABASE_ANON_KEY = (
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
+    ".eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx2Z2R2aWJ0Y3locG95dXlxeWxuIiwicm9sZSI6"
+    "ImFub24iLCJpYXQiOjE3ODA5NjM5NDAsImV4cCI6MjA5NjUzOTk0MH0"
+    ".Dd-goIMGND1kZNq8JvXJBn2_AbyQAVEJmfUd2ZrmlC4"
+)
+
 # --- Таблици в Supabase ---
 SALES_TABLE = "sales"
 COSTS_TABLE = "product_costs"
