@@ -2,14 +2,21 @@
 
 Стартиране:  streamlit run app.py
 """
+import datetime as dt
+
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
+from plotly.subplots import make_subplots
 
+import config
+import ingest.load_weather as weather_ingest
 import theme
 from analytics import metrics
-from analytics.data import load_costs, load_sales
+from analytics.data import load_costs, load_sales, load_weather
 from analytics.forecast import forecast_revenue
+from analytics.weather import correlate_with_sales
 from db.costs_repo import upsert_costs
 from db.sales_repo import insert_sales, replace_all_sales
 from db.supabase_client import has_secret, has_service_key
@@ -33,9 +40,30 @@ def get_costs():
         return pd.DataFrame()
 
 
+@st.cache_data(ttl=600)
+def get_weather():
+    try:
+        return load_weather()
+    except Exception:
+        return pd.DataFrame()
+
+
 def chart(fig, height: int = 340):
     st.plotly_chart(theme.style_fig(fig, height), use_container_width=True,
                     config={"displayModeBar": False})
+
+
+def weather_chart(merged):
+    """Оборот (стълбове) и максимална температура (линия) по ден, две оси Y."""
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    fig.add_bar(x=merged["day"], y=merged["revenue"], name="Оборот",
+                marker_color=theme.ACCENT)
+    fig.add_scatter(x=merged["day"], y=merged["temp_max"], name="Макс. температура",
+                    mode="lines+markers", line=dict(color=theme.CHART_COLORS[1]),
+                    secondary_y=True)
+    theme.style_fig(fig, 360)
+    fig.update_yaxes(title_text="°C", secondary_y=True, showgrid=False)
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
 
 st.markdown(
@@ -94,6 +122,56 @@ with tab_dash:
         st.subheader("Печалба по продукт")
         st.dataframe(metrics.profit_by_product(df, costs), use_container_width=True,
                      hide_index=True)
+
+    # --- Време и оборот ---
+    st.subheader("Време и оборот")
+    cities = sorted(set(config.OBJECT_CITY.values()))
+    default_city = config.OBJECT_CITY.get(chosen) if chosen != "Всички обекти" else None
+    idx = cities.index(default_city) if default_city in cities else 0
+
+    wc1, wc2 = st.columns([3, 1])
+    city = wc1.selectbox("Град", cities, index=idx, key="weather_city")
+    if has_service_key():
+        if wc2.button("Обнови времето", key="weather_refresh",
+                      use_container_width=True):
+            with st.spinner("Дърпам времето от Open-Meteo..."):
+                try:
+                    bdates = df_all["business_date"].dropna()
+                    start = min(bdates) if len(bdates) else None
+                    end = dt.date.today() + dt.timedelta(days=14)
+                    n = weather_ingest.load_weather(start=start, end=end)
+                    st.success(f"Обновени {n} реда за времето.")
+                    get_weather.clear()
+                    st.rerun()
+                except Exception as e:  # noqa: BLE001
+                    st.error(f"Проблем с Open-Meteo: {e}")
+
+    weather_all = get_weather()
+    wcity = (
+        weather_all[weather_all["city"] == city]
+        if not weather_all.empty else weather_all
+    )
+    if wcity.empty:
+        st.info(
+            "Няма данни за времето за този град. Натисни бутона Обнови времето "
+            "(иска service_role ключ и изходящ интернет)."
+        )
+    else:
+        objs = [o for o, c in config.OBJECT_CITY.items() if c == city]
+        daily = metrics.revenue_by_business_day(df_all[df_all["object_name"].isin(objs)])
+        merged = correlate_with_sales(daily, wcity)
+        if merged.empty:
+            st.info("Няма припокриване между продажбите и времето за този град.")
+        else:
+            ct, cr = merged.attrs.get("corr_temp"), merged.attrs.get("corr_rain")
+            m1, m2 = st.columns(2)
+            m1.metric("Корелация с температурата",
+                      f"{ct:+.2f}" if ct is not None and ct == ct else "—",
+                      help="От -1 до +1. Положително = повече оборот при по-топло.")
+            m2.metric("Корелация с валежите",
+                      f"{cr:+.2f}" if cr is not None and cr == cr else "—",
+                      help="Положително = повече оборот при дъжд (напр. доставки).")
+            weather_chart(merged.sort_values("day"))
 
 
 def _refresh():
