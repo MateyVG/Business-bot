@@ -39,3 +39,22 @@ def load_sales() -> pd.DataFrame:
 
 def load_costs() -> pd.DataFrame:
     return _load_table(config.COSTS_TABLE)
+
+
+def load_weather(city: str | None = None) -> pd.DataFrame:
+    """Чете синоптичните данни от таблицата weather.
+
+    `day` се връща като date (за коректно свързване с business_date), а
+    числовите колони се привеждат към числа. По избор филтрира по град.
+    """
+    df = _load_table(config.WEATHER_TABLE)
+    if df.empty:
+        return df
+    df["day"] = pd.to_datetime(df["day"], errors="coerce").dt.date
+    for col in ("temp_max", "temp_min", "precipitation", "weather_code"):
+        if col in df:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+    if city is not None:
+        df = df[df["city"] == city]
+    return df.reset_index(drop=True)
+

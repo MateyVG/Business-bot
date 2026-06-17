@@ -58,3 +58,8 @@ def has_service_key() -> bool:
     Без него writes-ите (качване/редакция на данни) ще се отрежат от RLS.
     """
     return bool(_secret("SUPABASE_SERVICE_KEY"))
+
+
+def has_secret(name: str) -> bool:
+    """Дали даден ключ е наличен (в средата или Streamlit secrets)."""
+    return bool(_secret(name))

@@ -12,6 +12,7 @@ from openai import OpenAI
 
 from analytics import metrics
 from analytics.forecast import forecast_revenue
+from analytics.weather import weather_insights
 
 load_dotenv()
 
@@ -20,11 +21,14 @@ SYSTEM_PROMPT = (
     "Отговаряй на български, кратко и по същество. "
     "Използвай САМО числата от подадения контекст — никога не измисляй стойности. "
     "Работният ден приключва в 07:00 (нощните продажби влизат в предишния ден). "
+    "Ако в контекста има раздел weather, използвай го за връзки тип време↔оборот "
+    "(напр. при дъжд доставките се променят) и давай практични съвети. "
     "Давай конкретни препоръки за продажби, маркетинг и асортимент."
 )
 
 
-def build_context(df: pd.DataFrame, costs: pd.DataFrame | None = None) -> dict:
+def build_context(df: pd.DataFrame, costs: pd.DataFrame | None = None,
+                  weather: pd.DataFrame | None = None) -> dict:
     ctx = {
         "total_revenue": metrics.total_revenue(df),
         "growth_pct_last_day": round(metrics.growth_rate(df), 1),
@@ -40,15 +44,19 @@ def build_context(df: pd.DataFrame, costs: pd.DataFrame | None = None) -> dict:
         ctx["profit_by_product"] = (
             metrics.profit_by_product(df, costs).head(15).to_dict(orient="records")
         )
+    if weather is not None and not weather.empty:
+        insights = weather_insights(df, weather)
+        if insights:
+            ctx["weather"] = insights
     return ctx
 
 
 def ask(question: str, df: pd.DataFrame, costs: pd.DataFrame | None = None,
-        history: list[dict] | None = None) -> str:
+        history: list[dict] | None = None, weather: pd.DataFrame | None = None) -> str:
     client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
     model = os.environ.get("OPENAI_MODEL", "gpt-4o")
 
-    context = build_context(df, costs)
+    context = build_context(df, costs, weather)
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     if history:
         messages.extend(history)
