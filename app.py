@@ -19,12 +19,40 @@ from analytics.forecast import forecast_revenue
 from analytics.weather import correlate_with_sales
 from db.costs_repo import upsert_costs
 from db.sales_repo import insert_sales, replace_all_sales
-from db.supabase_client import has_secret, has_service_key
+from db.supabase_client import get_secret, has_secret, has_service_key
 from ingest.load_costs import read_costs_excel
 from ingest.load_excel import read_sales_excel
 
 st.set_page_config(page_title="Бизнес Анализатор", layout="wide")
 st.markdown(theme.css(), unsafe_allow_html=True)
+
+
+def require_password():
+    """Парола за достъп. Активна само ако е зададен APP_PASSWORD (secrets/.env).
+
+    Без зададена парола приложението е отворено (удобно за локална разработка).
+    На деплой ЗАДЪЛЖИТЕЛНО задай APP_PASSWORD в Streamlit secrets.
+    """
+    expected = get_secret("APP_PASSWORD")
+    if not expected or st.session_state.get("auth_ok"):
+        return
+    st.markdown(
+        theme.header_html("Бизнес Анализатор", "Въведи парола за достъп"),
+        unsafe_allow_html=True,
+    )
+    with st.form("login"):
+        pwd = st.text_input("Парола", type="password")
+        submitted = st.form_submit_button("Вход")
+    if submitted:
+        if pwd == expected:
+            st.session_state["auth_ok"] = True
+            st.rerun()
+        else:
+            st.error("Грешна парола.")
+    st.stop()
+
+
+require_password()
 
 
 @st.cache_data(ttl=300)

@@ -37,11 +37,16 @@ Python · Streamlit · pandas · Supabase (PostgreSQL) · OpenAI · Plotly · Op
 
 | Ключ | За какво | Откъде |
 |------|----------|--------|
-| `SUPABASE_SERVICE_KEY` | качване/редакция (заобикаля RLS) | Supabase → Project Settings → API → service_role |
+| `APP_PASSWORD` | парола за достъп до приложението | избираш я сам (силна парола) |
+| `SUPABASE_SERVICE_KEY` | четене/качване/редакция (заобикаля RLS) | Supabase → Project Settings → API → service_role |
 | `OPENAI_API_KEY` | чат асистент | platform.openai.com → API keys |
 
-`SUPABASE_URL` и `SUPABASE_ANON_KEY` (само четене) вече имат стойности по
-подразбиране в `config.py`.
+`SUPABASE_URL` и `SUPABASE_ANON_KEY` вече имат стойности по подразбиране в
+`config.py`. При secure-public режим (anon четенето е забранено от RLS)
+приложението чете със `SUPABASE_SERVICE_KEY` — затова той е задължителен.
+
+> Без `APP_PASSWORD` приложението е отворено за всеки с линка — на деплой я
+> задай задължително.
 
 - **Локално:** `cp .env.example .env` и попълни тайните ключове.
 - **При деплой:** сложи ги в Streamlit secrets (виж по-долу).

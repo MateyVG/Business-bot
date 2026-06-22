@@ -63,3 +63,8 @@ def has_service_key() -> bool:
 def has_secret(name: str) -> bool:
     """Дали даден ключ е наличен (в средата или Streamlit secrets)."""
     return bool(_secret(name))
+
+
+def get_secret(name: str) -> str | None:
+    """Връща стойността на ключ от средата или Streamlit secrets (или None)."""
+    return _secret(name)
