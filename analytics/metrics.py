@@ -85,7 +85,11 @@ def profit_by_product(df: pd.DataFrame, costs: pd.DataFrame) -> pd.DataFrame:
     costs["unit_cost"] = pd.to_numeric(costs["unit_cost"], errors="coerce")
 
     merged = sales.merge(costs, on=["product_name", "channel"], how="left")
-    merged["cost"] = merged["unit_cost"].fillna(0) * merged["quantity"]
+    # Връщане (отрицателна стойност) реверсира и себестойността — иначе загубата
+    # излиза преувеличена. |к-во| × знак(стойност) работи и при двете конвенции
+    # за количеството на връщанията (положително или отрицателно в данните).
+    units = merged["quantity"].abs() * np.sign(merged["amount"])
+    merged["cost"] = merged["unit_cost"].fillna(0) * units
     g = merged.groupby("product_name").agg(
         revenue=("amount", "sum"), cost=("cost", "sum")
     ).reset_index()
