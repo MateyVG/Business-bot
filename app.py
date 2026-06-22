@@ -105,23 +105,25 @@ st.markdown(
 df_all = get_data()
 costs = get_costs()
 
-if df_all.empty:
-    st.warning(
-        "Няма данни. Качи продажби от таб Продажби или с командата "
-        "`python -m ingest.load_excel файл.xlsx`."
-    )
-    st.stop()
+has_data = not df_all.empty
 
 # --- Филтър по обект (важи за таблото и чата, не за управлението на цените) ---
-objects = ["Всички обекти"] + sorted(df_all["object_name"].dropna().unique().tolist())
-chosen = st.sidebar.selectbox("Обект", objects)
-df = df_all if chosen == "Всички обекти" else df_all[df_all["object_name"] == chosen]
+if has_data:
+    objects = ["Всички обекти"] + sorted(df_all["object_name"].dropna().unique().tolist())
+    chosen = st.sidebar.selectbox("Обект", objects)
+    df = df_all if chosen == "Всички обекти" else df_all[df_all["object_name"] == chosen]
+else:
+    chosen = "Всички обекти"
+    df = df_all
 
 tab_dash, tab_sales, tab_costs, tab_chat = st.tabs(
     ["Табло", "Продажби", "Себестойности", "Чат асистент"]
 )
 
 with tab_dash:
+  if not has_data:
+    st.info("Все още няма данни. Качи продажби от таб Продажби, за да се появи таблото.")
+  else:
     deliv = metrics.delivery_split(df)
     deliv_rev = float(deliv.loc[deliv["channel"] == "Доставка", "revenue"].sum())
     total = metrics.total_revenue(df)
@@ -271,8 +273,10 @@ with tab_costs:
         )
 
     st.subheader("Продукти без себестойност")
-    missing = metrics.missing_costs(df_all, costs)
-    if missing.empty:
+    missing = metrics.missing_costs(df_all, costs) if has_data else costs.iloc[0:0]
+    if not has_data:
+        st.caption("Ще се покаже след като качиш продажби.")
+    elif missing.empty:
         st.success("Всички продавани продукти имат себестойност.")
     else:
         st.caption(
@@ -353,6 +357,9 @@ with tab_chat:
         "Питай на естествен език за продажбите, доставките, маркетинга и "
         "прогнозите. Отговорите се смятат от реалните данни."
     )
+    if not has_data:
+        st.info("Качи продажби, за да може асистентът да анализира данните.")
+        st.stop()
     if not has_secret("OPENAI_API_KEY"):
         st.info(
             "Чатът иска `OPENAI_API_KEY` в Streamlit secrets или `.env`, за да "
