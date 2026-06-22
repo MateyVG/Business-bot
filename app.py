@@ -23,7 +23,7 @@ from db.supabase_client import get_secret, has_secret, has_service_key
 from ingest.load_costs import read_costs_excel
 from ingest.load_excel import read_sales_excel
 
-st.set_page_config(page_title="Бизнес Анализатор", layout="wide")
+st.set_page_config(page_title="Призма", layout="wide")
 st.markdown(theme.css(), unsafe_allow_html=True)
 
 
@@ -37,7 +37,7 @@ def require_password():
     if not expected or st.session_state.get("auth_ok"):
         return
     st.markdown(
-        theme.header_html("Бизнес Анализатор", "Въведи парола за достъп"),
+        theme.header_html("Призма", "Въведи парола за достъп"),
         unsafe_allow_html=True,
     )
     with st.form("login"):
@@ -98,7 +98,7 @@ def weather_chart(merged):
 
 
 st.markdown(
-    theme.header_html("Бизнес Анализатор", "Продажби, печалба и прогнози на едно място"),
+    theme.header_html("Призма", "Анализ на продажби, печалба и прогнози"),
     unsafe_allow_html=True,
 )
 
@@ -156,17 +156,24 @@ with tab_dash:
         st.dataframe(metrics.profit_by_product(df, costs), use_container_width=True,
                      hide_index=True)
 
-    # --- Време и оборот ---
+    # --- Време и оборот (следва избрания обект) ---
     st.subheader("Време и оборот")
-    cities = sorted(set(config.OBJECT_CITY.values()))
-    default_city = config.city_for(chosen) if chosen != "Всички обекти" else None
-    idx = cities.index(default_city) if default_city in cities else 0
+    if chosen != "Всички обекти":
+        # Времето следва региона на избрания обект (София -> София и т.н.)
+        city = config.city_for(chosen)
+        sales_for_corr = df  # оборотът на самия обект
+        if city:
+            st.caption(f"Регион на обекта: {city}")
+        else:
+            st.info("За този обект няма зададен регион.")
+    else:
+        cities = sorted(set(config.OBJECT_CITY.values()))
+        city = st.selectbox("Град", cities, key="weather_city")
+        in_city = df_all["object_name"].map(lambda n: config.city_for(n) == city)
+        sales_for_corr = df_all[in_city]
 
-    wc1, wc2 = st.columns([3, 1])
-    city = wc1.selectbox("Град", cities, index=idx, key="weather_city")
     if has_service_key():
-        if wc2.button("Обнови времето", key="weather_refresh",
-                      use_container_width=True):
+        if st.button("Обнови времето", key="weather_refresh"):
             with st.spinner("Дърпам времето от Open-Meteo..."):
                 try:
                     bdates = df_all["business_date"].dropna()
@@ -180,21 +187,15 @@ with tab_dash:
                     st.error(f"Проблем с Open-Meteo: {e}")
 
     weather_all = get_weather()
-    wcity = (
-        weather_all[weather_all["city"] == city]
-        if not weather_all.empty else weather_all
-    )
-    if wcity.empty:
-        st.info(
-            "Няма данни за времето за този град. Натисни бутона Обнови времето "
-            "(иска service_role ключ и изходящ интернет)."
-        )
-    else:
-        in_city = df_all["object_name"].map(lambda n: config.city_for(n) == city)
-        daily = metrics.revenue_by_business_day(df_all[in_city])
+    wcity = (weather_all[weather_all["city"] == city]
+             if city and not weather_all.empty else weather_all.iloc[0:0])
+    if city and wcity.empty:
+        st.info("Няма данни за времето за този регион. Натисни Обнови времето.")
+    elif city:
+        daily = metrics.revenue_by_business_day(sales_for_corr)
         merged = correlate_with_sales(daily, wcity)
         if merged.empty:
-            st.info("Няма припокриване между продажбите и времето за този град.")
+            st.info("Няма припокриване между продажбите и времето.")
         else:
             ct, cr = merged.attrs.get("corr_temp"), merged.attrs.get("corr_rain")
             m1, m2 = st.columns(2)
