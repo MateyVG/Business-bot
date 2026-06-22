@@ -68,23 +68,32 @@ def growth_rate(df: pd.DataFrame) -> float:
     return float((last - prev) / prev * 100) if prev else 0.0
 
 
+def _nkey(s: pd.Series) -> pd.Series:
+    """Нормализиран ключ за свързване по име (без значение регистър/интервали)."""
+    return (s.astype(str).str.replace(r"\s+", " ", regex=True)
+            .str.strip().str.casefold())
+
+
 def profit_by_product(df: pd.DataFrame, costs: pd.DataFrame) -> pd.DataFrame:
     """Печалба по продукт = приход - (себестойност × количество).
 
     `costs` трябва да има колони: product_name, channel, unit_cost.
     Себестойността зависи от канала (на място / доставка), затова свързваме по
-    (product_name, channel), а каналът се определя от is_delivery в продажбите.
+    (product_name, channel) — устойчиво на регистър и интервали в имената.
     """
     if costs is None or costs.empty:
         return pd.DataFrame(columns=["product_name", "revenue", "cost", "profit", "margin_pct"])
 
     sales = df.copy()
     sales["channel"] = np.where(sales.get("is_delivery", False), "delivery", "onsite")
+    sales["_k"] = _nkey(sales["product_name"])
 
     costs = costs[["product_name", "channel", "unit_cost"]].copy()
     costs["unit_cost"] = pd.to_numeric(costs["unit_cost"], errors="coerce")
+    costs["_k"] = _nkey(costs["product_name"])
 
-    merged = sales.merge(costs, on=["product_name", "channel"], how="left")
+    merged = sales.merge(costs[["_k", "channel", "unit_cost"]],
+                         on=["_k", "channel"], how="left")
     # Връщане (отрицателна стойност) реверсира и себестойността — иначе загубата
     # излиза преувеличена. |к-во| × знак(стойност) работи и при двете конвенции
     # за количеството на връщанията (положително или отрицателно в данните).
@@ -117,8 +126,11 @@ def missing_costs(df: pd.DataFrame, costs: pd.DataFrame) -> pd.DataFrame:
     if costs is None or costs.empty:
         return agg.sort_values("revenue", ascending=False).reset_index(drop=True)
 
-    have = costs[["product_name", "channel"]].drop_duplicates()
+    agg["_k"] = _nkey(agg["product_name"])
+    have = costs[["product_name", "channel"]].copy()
+    have["_k"] = _nkey(have["product_name"])
+    have = have[["_k", "channel"]].drop_duplicates()
     have["_has"] = True
-    m = agg.merge(have, on=["product_name", "channel"], how="left")
-    missing = m[m["_has"].isna()].drop(columns="_has")
+    m = agg.merge(have, on=["_k", "channel"], how="left")
+    missing = m[m["_has"].isna()].drop(columns=["_has", "_k"])
     return missing.sort_values("revenue", ascending=False).reset_index(drop=True)
