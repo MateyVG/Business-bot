@@ -6,7 +6,10 @@ from db.supabase_client import get_client
 
 
 def _load_table(table: str) -> pd.DataFrame:
-    client = get_client()
+    # Четем със service ключа (стои само в secrets/.env). Така RLS може да
+    # забрани четенето с anon ключа и репото да е публично БЕЗ да изтичат данни:
+    # публичният anon ключ става безполезен, а service ключът остава таен.
+    client = get_client(use_service_key=True)
     rows, page, size = [], 0, 1000
     while True:
         resp = (
