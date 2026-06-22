@@ -394,7 +394,7 @@ with tab_chat:
                 try:
                     from bot.assistant import ask
 
-                    answer = ask(question, df, costs, st.session_state.history[:-1],
+                    answer = ask(question, df_all, costs, st.session_state.history[:-1],
                                  weather=get_weather())
                 except Exception as e:  # noqa: BLE001
                     answer = f"Не успях да отговоря: {e}"
