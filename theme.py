@@ -16,7 +16,7 @@ BORDER = "#e6e3da"
 # Палитра за графиките (землисти, но четими)
 CHART_COLORS = ["#2f7a6f", "#c98a2b", "#b5654a", "#6a7bd6", "#2f8f5b", "#c5573f"]
 
-FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, system-ui, sans-serif"
+FONT = "'Hanken Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif"
 
 
 def style_fig(fig, height: int = 340):
@@ -41,7 +41,9 @@ def css() -> str:
     """CSS, който придава вида на „Призма" (вмъква се през st.markdown)."""
     return f"""
 <style>
-html, body, [class*="css"], .stMarkdown {{ font-family: {FONT}; }}
+@import url('https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&display=swap');
+html, body, [class*="css"], .stMarkdown,
+[class*="st-"], button, input, textarea, select {{ font-family: {FONT} !important; }}
 .stApp {{ background: {BG}; }}
 
 #MainMenu, footer {{ visibility: hidden; }}
