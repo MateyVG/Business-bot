@@ -6,6 +6,7 @@ import datetime as dt
 
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 from plotly.subplots import make_subplots
 
@@ -78,6 +79,55 @@ def _refresh():
 def chart(fig, height=320):
     st.plotly_chart(theme.style_fig(fig, height), use_container_width=True,
                     config={"displayModeBar": False})
+
+
+def raw_chart(fig):
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+
+def donut(d, names_col, values_col):
+    fig = px.pie(d, names=names_col, values=values_col, hole=0.62)
+    theme.style_fig(fig, 260)
+    fig.update_traces(textposition="inside", textinfo="percent")
+    fig.update_layout(legend=dict(orientation="v", x=1.0, y=0.5, yanchor="middle"))
+    return fig
+
+
+def gauge(value, color=theme.ACCENT, height=220):
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number", value=value,
+        number={"suffix": "%", "font": {"size": 30, "color": theme.TEXT}},
+        gauge={"axis": {"range": [0, 100], "tickwidth": 0, "tickcolor": theme.BORDER},
+               "bar": {"color": color, "thickness": 0.32},
+               "bgcolor": "#efece4", "borderwidth": 0}))
+    fig.update_layout(height=height, margin=dict(l=24, r=24, t=8, b=0),
+                      paper_bgcolor=theme.SURFACE,
+                      font=dict(family=theme.FONT, color=theme.TEXT))
+    return fig
+
+
+def forecast_band(fc, factor=1.0):
+    """Прогноза с доверителен интервал (Реални / Прогноза / Интервал)."""
+    act = fc[fc["kind"] == "actual"]
+    fo = fc[fc["kind"] == "forecast"].copy()
+    fo["revenue"] = fo["revenue"] * factor
+    # свързваме последната реална точка с прогнозата
+    if not act.empty:
+        bridge = act.iloc[[-1]][["business_date", "revenue"]]
+        fo = pd.concat([bridge.assign(kind="forecast"), fo], ignore_index=True)
+    up, lo = fo["revenue"] * 1.12, fo["revenue"] * 0.88
+    fig = go.Figure()
+    fig.add_scatter(x=act["business_date"], y=act["revenue"], name="Реални",
+                    mode="lines", line=dict(color=theme.ACCENT, width=2.5))
+    fig.add_scatter(x=fo["business_date"], y=up, mode="lines", line=dict(width=0),
+                    showlegend=False, hoverinfo="skip")
+    fig.add_scatter(x=fo["business_date"], y=lo, mode="lines", line=dict(width=0),
+                    fill="tonexty", fillcolor="rgba(47,122,111,.15)", name="Интервал",
+                    hoverinfo="skip")
+    fig.add_scatter(x=fo["business_date"], y=fo["revenue"], name="Прогноза",
+                    mode="lines", line=dict(color=theme.ACCENT, width=2.5, dash="dash"))
+    theme.style_fig(fig, 360)
+    return fig
 
 
 def _orders(d):
@@ -174,8 +224,9 @@ if nav == "Табло":
         chart(px.line(fc, x="business_date", y="revenue", color="kind", markers=True), 330)
     with c2:
         st.subheader("Канали")
-        deliv = metrics.delivery_split(cur)
-        chart(px.pie(deliv, values="revenue", names="channel", hole=0.6), 250)
+        raw_chart(donut(metrics.delivery_split(cur), "channel", "revenue"))
+        st.subheader("Дял доставки")
+        raw_chart(gauge(ds, theme.CHART_COLORS[1]))
 
     c3, c4 = st.columns(2)
     with c3:
@@ -267,10 +318,9 @@ elif nav == "Прогнози":
     scenario = st.radio("Сценарий", ["Оптимистичен", "Базов", "Консервативен"],
                         index=1, horizontal=True, label_visibility="collapsed")
     factor = {"Оптимистичен": 1.1, "Базов": 1.0, "Консервативен": 0.9}[scenario]
-    fc = forecast_revenue(df, days=14).copy()
-    fc.loc[fc["kind"] == "forecast", "revenue"] *= factor
-    chart(px.line(fc, x="business_date", y="revenue", color="kind", markers=True), 360)
-    fut = fc[fc["kind"] == "forecast"]["revenue"].sum()
+    fc = forecast_revenue(df, days=14)
+    raw_chart(forecast_band(fc, factor))
+    fut = fc[fc["kind"] == "forecast"]["revenue"].sum() * factor
     k1, k2, k3 = st.columns(3)
     k1.metric("Прогноза (14 дни)", f"{fut:,.0f} лв.")
     k2.metric("Сценарий", scenario)
@@ -324,17 +374,23 @@ elif nav == "Сегменти":
     st.markdown('<div class="pz-sub">По обекти и региони · '
                 'нямаме клиентски данни, затова сегментираме обектите</div>',
                 unsafe_allow_html=True)
-    obj = metrics.revenue_by_object(cur)
+    seg = cur.copy()
+    seg["region"] = seg["object_name"].map(config.city_for)
+    agg = {"revenue": ("amount", "sum")}
+    agg["orders"] = ("order_no", "nunique") if "order_no" in seg else ("amount", "size")
+    g = seg.groupby(["object_name", "region"]).agg(**agg).reset_index()
+    g["avg_check"] = g["revenue"] / g["orders"].replace(0, 1)
     a, b = st.columns([3, 2])
     with a:
-        st.subheader("Оборот по обект")
-        chart(px.bar(obj, x="revenue", y="object_name", orientation="h"), 460)
+        st.subheader("Обекти · поръчки, среден чек, оборот")
+        fig = px.scatter(g, x="orders", y="avg_check", size="revenue", color="region",
+                         hover_name="object_name", size_max=46)
+        fig.update_layout(xaxis_title="Поръчки", yaxis_title="Среден чек")
+        chart(fig, 460)
     with b:
         st.subheader("По регион")
-        reg = cur.copy()
-        reg["region"] = reg["object_name"].map(config.city_for)
-        rg = reg.groupby("region")["amount"].sum().sort_values(ascending=False).reset_index(name="revenue")
-        chart(px.pie(rg, values="revenue", names="region", hole=0.6), 320)
+        rg = g.groupby("region")["revenue"].sum().sort_values(ascending=False).reset_index()
+        raw_chart(donut(rg, "region", "revenue"))
 
 # ===== КАЧИ ДАННИ =====
 elif nav == "Качи данни":
