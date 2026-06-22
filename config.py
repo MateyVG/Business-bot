@@ -7,12 +7,12 @@ import re
 # Стойностите от .env (ако има) имат приоритет пред тези по подразбиране.
 # ⚠️ ТАЙНИТЕ ключове (service_role за качване, OPENAI_API_KEY) НИКОГА не влизат
 #    тук — само в локалния .env, който е в .gitignore.
-SUPABASE_URL = "https://lvgdvibtcyhpoyuyqyln.supabase.co"
+SUPABASE_URL = "https://vdheytoilcmxuescgcus.supabase.co"
 SUPABASE_ANON_KEY = (
     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
-    ".eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx2Z2R2aWJ0Y3locG95dXlxeWxuIiwicm9sZSI6"
-    "ImFub24iLCJpYXQiOjE3ODA5NjM5NDAsImV4cCI6MjA5NjUzOTk0MH0"
-    ".Dd-goIMGND1kZNq8JvXJBn2_AbyQAVEJmfUd2ZrmlC4"
+    ".eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZkaGV5dG9pbGNteHVlc2NnY3VzIiwicm9sZSI6"
+    "ImFub24iLCJpYXQiOjE3ODIwODc2MDUsImV4cCI6MjA5NzY2MzYwNX0"
+    ".BsSBbJIWb6ctE5EpQPg0jdUNl--uBw3t5SWhQo8c2i0"
 )
 
 # --- Таблици в Supabase ---
