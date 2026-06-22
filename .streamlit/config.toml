@@ -1,10 +1,10 @@
-# Тема на приложението — светла, с топъл акцент.
+# Тема „Призма" — топла светла с тийл-зелен акцент.
 [theme]
 base = "light"
-primaryColor = "#F25C3B"
-backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F6F7F9"
-textColor = "#15181C"
+primaryColor = "#2f7a6f"
+backgroundColor = "#f4f2ed"
+secondaryBackgroundColor = "#ffffff"
+textColor = "#1b1c17"
 font = "sans serif"
 
 [client]

@@ -23,7 +23,7 @@ from db.supabase_client import get_secret, has_secret, has_service_key
 from ingest.load_costs import read_costs_excel
 from ingest.load_excel import read_sales_excel
 
-st.set_page_config(page_title="Бизнес Анализатор", layout="wide")
+st.set_page_config(page_title="Призма", layout="wide")
 st.markdown(theme.css(), unsafe_allow_html=True)
 
 
@@ -37,7 +37,7 @@ def require_password():
     if not expected or st.session_state.get("auth_ok"):
         return
     st.markdown(
-        theme.header_html("Бизнес Анализатор", "Въведи парола за достъп"),
+        theme.header_html("Призма", "Въведи парола за достъп"),
         unsafe_allow_html=True,
     )
     with st.form("login"):
@@ -98,7 +98,7 @@ def weather_chart(merged):
 
 
 st.markdown(
-    theme.header_html("Бизнес Анализатор", "Продажби, печалба и прогнози на едно място"),
+    theme.header_html("Призма", "Анализ на продажби, печалба и прогнози"),
     unsafe_allow_html=True,
 )
 
