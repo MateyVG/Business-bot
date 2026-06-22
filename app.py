@@ -239,7 +239,7 @@ if nav == "Табло":
         obj = metrics.revenue_by_object(cur)
         if not obj.empty:
             ins.append(("pos", f"Най-силен обект: {obj.iloc[0]['object_name']} "
-                               f"({obj.iloc[0]['revenue']:,.0f} лв.)"))
+                               f"(€{obj.iloc[0]['revenue']:,.0f})".replace(",", " ")))
         cat = metrics.revenue_by_category(cur)
         if not cat.empty:
             ins.append(("info", f"Водеща категория: {cat.iloc[0]['category']}"))
@@ -322,7 +322,7 @@ elif nav == "Прогнози":
     raw_chart(forecast_band(fc, factor))
     fut = fc[fc["kind"] == "forecast"]["revenue"].sum() * factor
     k1, k2, k3 = st.columns(3)
-    k1.metric("Прогноза (14 дни)", f"{fut:,.0f} лв.")
+    k1.metric("Прогноза (14 дни)", f"€{fut:,.0f}".replace(",", " "))
     k2.metric("Сценарий", scenario)
     k3.metric("Дневен ръст", f"{metrics.growth_rate(df):+.1f}%")
 
@@ -432,3 +432,38 @@ elif nav == "Качи данни":
                 st.success(f"Готово: {nrec} реда."); _refresh()
         except Exception as e:  # noqa: BLE001
             st.error(f"Проблем: {e}")
+
+    st.divider()
+    st.subheader("Редакция на себестойностите")
+    st.caption("Коригирай цена директно в клетката или добави нов ред, после Запази.")
+    base = costs.copy()
+    if base.empty:
+        base = pd.DataFrame(columns=["product_name", "channel", "unit_cost"])
+    edited = st.data_editor(
+        base[["product_name", "channel", "unit_cost"]] if not base.empty else base,
+        num_rows="dynamic", use_container_width=True, hide_index=True,
+        disabled=not can_write,
+        column_config={
+            "product_name": st.column_config.TextColumn("Продукт", required=True),
+            "channel": st.column_config.SelectboxColumn(
+                "Канал", options=["onsite", "delivery"], required=True),
+            "unit_cost": st.column_config.NumberColumn(
+                "Себестойност (€)", min_value=0.0, step=0.01, format="%.4f"),
+        }, key="costs_editor")
+    if st.button("Запази промените", type="primary", disabled=not can_write):
+        clean = edited.copy()
+        clean["product_name"] = clean["product_name"].astype(str).str.strip()
+        clean = clean[(clean["product_name"] != "")
+                      & clean["channel"].isin(["onsite", "delivery"])]
+        clean["unit_cost"] = pd.to_numeric(clean["unit_cost"], errors="coerce")
+        clean = clean.drop_duplicates(subset=["product_name", "channel"], keep="last")
+        clean["updated_at"] = pd.Timestamp.now(tz="UTC").isoformat()
+        if clean.empty:
+            st.warning("Няма валидни редове за запис.")
+        else:
+            try:
+                with st.spinner("Запазвам..."):
+                    nrec = upsert_costs(clean)
+                st.success(f"Запазени {nrec} реда."); _refresh()
+            except Exception as e:  # noqa: BLE001
+                st.error(f"Проблем при запис: {e}")

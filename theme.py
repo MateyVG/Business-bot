@@ -96,9 +96,12 @@ h1, h2, h3 {{ color: {TEXT}; letter-spacing: -0.01em; }}
   padding: 10px 8px 4px; box-shadow: 0 4px 16px rgba(0,0,0,0.04);
 }}
 
-/* Чат / таблици / качване */
+/* Чат — без аватар иконите, чисти балончета */
+[data-testid="stChatMessageAvatarUser"], [data-testid="stChatMessageAvatarAssistant"],
+[data-testid^="chatAvatarIcon"], [data-testid="stChatMessage"] > img:first-child,
+[data-testid="stChatMessage"] [data-testid="stImage"] {{ display: none !important; }}
 [data-testid="stChatMessage"] {{ background: {SURFACE}; border: 1px solid {BORDER};
-  border-radius: 16px; }}
+  border-radius: 16px; padding: 2px 16px; gap: 0; }}
 [data-testid="stDataFrame"] {{ border-radius: 12px; overflow: hidden; }}
 [data-testid="stFileUploaderDropzone"] {{ border-radius: 12px; border: 1.5px dashed {BORDER};
   background: {SURFACE}; }}

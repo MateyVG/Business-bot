@@ -20,13 +20,20 @@ import config
 load_dotenv()
 
 SYSTEM_PROMPT = (
-    "Ти си опитен бизнес анализатор за верига заведения за бързо хранене. "
-    "Отговаряй на български, кратко и конкретно. "
-    "За всякакви числа ВИНАГИ ползвай инструментите (query_sales, weather_forecast, "
-    "weather_vs_sales) — никога не измисляй стойности. Можеш да правиш няколко "
-    "извиквания, за да съчетаеш разрези (напр. по обекти, по дни, по оператор). "
-    "Работният ден приключва в 07:00 (нощните продажби влизат в предишния ден). "
-    "Давай практични препоръки за продажби, маркетинг и асортимент."
+    "Ти си старши бизнес анализатор и маркетинг съветник за верига заведения за "
+    "бързо хранене. Отговаряй на български, конкретно и по същество.\n"
+    "ПРАВИЛА:\n"
+    "1. За всякакви числа ВИНАГИ ползвай инструментите (query_sales, "
+    "weather_forecast, weather_vs_sales). Никога не измисляй стойности. Прави "
+    "няколко извиквания при нужда.\n"
+    "2. Бъди ПРОАКТИВЕН: освен прякия отговор, прави и СРАВНЕНИЯ (този период "
+    "спрямо предходен, обект спрямо обект, ден спрямо ден), намирай тенденции и "
+    "аномалии и давай 1-2 конкретни МАРКЕТИНГ/продажбени препоръки.\n"
+    "3. Всички парични стойности са в ЕВРО (€).\n"
+    "4. ВАЖНО за данните: нямаме индивидуални клиенти/профили. Най-близкото до "
+    "„брой клиенти“ е броят поръчки/бонове — ползвай query_sales с metric='orders'. "
+    "Кажи това честно, ако питат за клиенти, и дай броя поръчки.\n"
+    "5. Работният ден приключва в 07:00 (нощните продажби влизат в предишния ден)."
 )
 
 WEEKDAYS_BG = ["Понеделник", "Вторник", "Сряда", "Четвъртък", "Петък",
@@ -142,8 +149,8 @@ TOOLS = [
                         "description": "Разрез; пропусни за обща сума."},
                     "metric": {"type": "string",
                                "enum": ["revenue", "quantity", "orders"],
-                               "description": "revenue=оборот, quantity=количество, "
-                                              "orders=брой поръчки/бонове."},
+                               "description": "revenue=оборот (€), quantity=количество, "
+                                              "orders=брой поръчки/бонове (≈ брой клиенти)."},
                     "object": {"type": "string", "description": "Филтър по обект."},
                     "category": {"type": "string", "description": "Филтър по категория."},
                     "channel": {"type": "string", "enum": ["onsite", "delivery"]},
@@ -182,17 +189,25 @@ TOOLS = [
 
 
 def _overview(df, weather=None):
-    """Кратък контекст, за да знае моделът какви стойности има за филтри."""
+    """Кратък снимков контекст (за валидни филтри + бърза ориентация)."""
     bdate = pd.to_datetime(df["business_date"], errors="coerce")
-    ov = {
+    total = float(pd.to_numeric(df["amount"], errors="coerce").sum())
+    orders = int(df["order_no"].nunique()) if "order_no" in df else len(df)
+    deliv = float(pd.to_numeric(df.loc[df.get("is_delivery", False), "amount"],
+                                errors="coerce").sum()) if "is_delivery" in df else 0.0
+    return {
+        "валута": "EUR (€)",
         "обекти": sorted(df["object_name"].dropna().unique().tolist()),
         "категории": sorted(df["category"].dropna().unique().tolist()),
         "период": [str(bdate.min().date()) if bdate.notna().any() else None,
                    str(bdate.max().date()) if bdate.notna().any() else None],
-        "общ_оборот": round(float(pd.to_numeric(df["amount"], errors="coerce").sum()), 2),
+        "общ_оборот_EUR": round(total, 2),
+        "брой_поръчки": orders,
+        "среден_чек_EUR": round(total / orders, 2) if orders else 0,
+        "дял_доставки_пр": round(deliv / total * 100, 1) if total else 0,
+        "забележка_клиенти": "Няма индивидуални клиенти; брой_поръчки е проксито.",
         "време_заредено": bool(weather is not None and not weather.empty),
     }
-    return ov
 
 
 def ask(question: str, df: pd.DataFrame, costs: pd.DataFrame | None = None,
