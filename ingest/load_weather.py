@@ -27,8 +27,14 @@ def default_cities() -> list[str]:
 
 def fetch_weather(cities: list[str], start: dt.date, end: dt.date) -> pd.DataFrame:
     """Връща обединено дневно време за списък градове в периода [start, end]."""
-    frames = [get_weather(c, start, end) for c in cities]
-    frames = [f for f in frames if not f.empty]
+    frames = []
+    for c in cities:
+        try:
+            f = get_weather(c, start, end)
+            if not f.empty:
+                frames.append(f)
+        except Exception as e:  # noqa: BLE001 — една грешка да не спира останалите градове
+            print(f"  внимание: времето за {c} се провали ({e})")
     if not frames:
         return pd.DataFrame()
     return pd.concat(frames, ignore_index=True)

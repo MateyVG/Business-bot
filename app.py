@@ -367,13 +367,12 @@ elif nav == "Прогнози":
     elif city:
         st.info("Няма данни за времето за този регион. Натисни Обнови времето.")
 
-# ===== СЕГМЕНТИ (по обект/регион) =====
+# ===== СЕГМЕНТИ =====
 elif nav == "Сегменти":
-    cur, prev, sel = period_filter(df)
+    cur, prev, sel = period_filter(df_all)  # винаги всички обекти, не само избрания
     st.markdown('<div class="pz-hello">Сегменти</div>', unsafe_allow_html=True)
-    st.markdown('<div class="pz-sub">По обекти и региони · '
-                'нямаме клиентски данни, затова сегментираме обектите</div>',
-                unsafe_allow_html=True)
+    st.markdown(f'<div class="pz-sub">Всички обекти, региони, партньори и клиенти '
+                f'· {sel}</div>', unsafe_allow_html=True)
     seg = cur.copy()
     seg["region"] = seg["object_name"].map(config.city_for)
     agg = {"revenue": ("amount", "sum")}
@@ -386,11 +385,36 @@ elif nav == "Сегменти":
         fig = px.scatter(g, x="orders", y="avg_check", size="revenue", color="region",
                          hover_name="object_name", size_max=46)
         fig.update_layout(xaxis_title="Поръчки", yaxis_title="Среден чек")
-        chart(fig, 460)
+        chart(fig, 420)
     with b:
         st.subheader("По регион")
         rg = g.groupby("region")["revenue"].sum().sort_values(ascending=False).reset_index()
         raw_chart(donut(rg, "region", "revenue"))
+
+    # Партньори и клиенти (от реалните данни — за доставки)
+    c, d = st.columns(2)
+    with c:
+        st.subheader("Топ партньори")
+        if "partner" in seg and seg["partner"].notna().any():
+            p = (seg[seg["partner"].astype(str).str.strip() != ""]
+                 .groupby("partner")["amount"].sum()
+                 .sort_values(ascending=False).reset_index(name="revenue"))
+            st.markdown(prizma.top_list(p, "partner", "revenue"), unsafe_allow_html=True)
+        else:
+            st.caption("Няма попълнени партньори в този период.")
+    with d:
+        st.subheader("Топ клиенти (доставки)")
+        if "contact_person" in seg and seg["contact_person"].notna().any():
+            cl = (seg[seg["contact_person"].astype(str).str.strip() != ""]
+                  .groupby("contact_person")["amount"].sum()
+                  .sort_values(ascending=False).reset_index(name="revenue"))
+            if cl.empty:
+                st.caption("Няма попълнени лица за контакт.")
+            else:
+                st.markdown(prizma.top_list(cl, "contact_person", "revenue"),
+                            unsafe_allow_html=True)
+        else:
+            st.caption("Няма попълнени лица за контакт в този период.")
 
 # ===== КАЧИ ДАННИ =====
 elif nav == "Качи данни":

@@ -30,9 +30,10 @@ SYSTEM_PROMPT = (
     "спрямо предходен, обект спрямо обект, ден спрямо ден), намирай тенденции и "
     "аномалии и давай 1-2 конкретни МАРКЕТИНГ/продажбени препоръки.\n"
     "3. Всички парични стойности са в ЕВРО (€).\n"
-    "4. ВАЖНО за данните: нямаме индивидуални клиенти/профили. Най-близкото до "
-    "„брой клиенти“ е броят поръчки/бонове — ползвай query_sales с metric='orders'. "
-    "Кажи това честно, ако питат за клиенти, и дай броя поръчки.\n"
+    "4. За клиенти: за ДОСТАВКИ имаме партньор (group_by='partner') и лице за "
+    "контакт (group_by='contact_person') — ползвай ги за топ клиенти/партньори. "
+    "За продажби на МЯСТО няма самоличност на клиента; там броят поръчки/бонове "
+    "(metric='orders') е проксито за брой клиенти. Обяснявай разликата честно.\n"
     "5. Работният ден приключва в 07:00 (нощните продажби влизат в предишния ден)."
 )
 
@@ -77,10 +78,14 @@ def _run_query(df, group_by=None, metric="revenue", object=None, category=None,
         key = "_g"
     elif group_by == "hour":
         key = "sale_hour"
-    elif group_by in ("object", "category", "product", "operator", "business_date"):
+    elif group_by in ("object", "category", "product", "operator", "business_date",
+                      "partner", "contact_person"):
         key = {"object": "object_name", "category": "category",
                "product": "product_name", "operator": "operator",
-               "business_date": "business_date"}[group_by]
+               "business_date": "business_date", "partner": "partner",
+               "contact_person": "contact_person"}[group_by]
+        if key not in d.columns:
+            return {"rows": [], "note": f"няма колона {group_by} в данните"}
     else:
         key = None
 
@@ -145,8 +150,10 @@ TOOLS = [
                 "properties": {
                     "group_by": {"type": "string", "enum": [
                         "object", "category", "product", "operator", "weekday",
-                        "hour", "business_date", "channel", "city"],
-                        "description": "Разрез; пропусни за обща сума."},
+                        "hour", "business_date", "channel", "city", "partner",
+                        "contact_person"],
+                        "description": "Разрез; пропусни за обща сума. partner и "
+                                       "contact_person са за доставки/клиенти."},
                     "metric": {"type": "string",
                                "enum": ["revenue", "quantity", "orders"],
                                "description": "revenue=оборот (€), quantity=количество, "
