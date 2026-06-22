@@ -1,4 +1,4 @@
-"""Бизнес Анализатор — уеб приложение (Streamlit).
+"""Призма — уеб приложение за бизнес анализ (Streamlit).
 
 Стартиране:  streamlit run app.py
 """
@@ -6,12 +6,12 @@ import datetime as dt
 
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 import streamlit as st
 from plotly.subplots import make_subplots
 
 import config
 import ingest.load_weather as weather_ingest
+import prizma
 import theme
 from analytics import metrics
 from analytics.data import load_costs, load_sales, load_weather
@@ -23,32 +23,24 @@ from db.supabase_client import get_secret, has_secret, has_service_key
 from ingest.load_costs import read_costs_excel
 from ingest.load_excel import read_sales_excel
 
-st.set_page_config(page_title="Призма", layout="wide")
+st.set_page_config(page_title="Призма", layout="wide", initial_sidebar_state="expanded")
 st.markdown(theme.css(), unsafe_allow_html=True)
 
 
 def require_password():
-    """Парола за достъп. Активна само ако е зададен APP_PASSWORD (secrets/.env).
-
-    Без зададена парола приложението е отворено (удобно за локална разработка).
-    На деплой ЗАДЪЛЖИТЕЛНО задай APP_PASSWORD в Streamlit secrets.
-    """
     expected = get_secret("APP_PASSWORD")
     if not expected or st.session_state.get("auth_ok"):
         return
-    st.markdown(
-        theme.header_html("Призма", "Въведи парола за достъп"),
-        unsafe_allow_html=True,
-    )
+    st.markdown(theme.header_html("Призма", "Въведи парола за достъп"),
+                unsafe_allow_html=True)
     with st.form("login"):
         pwd = st.text_input("Парола", type="password")
-        submitted = st.form_submit_button("Вход")
-    if submitted:
-        if pwd == expected:
-            st.session_state["auth_ok"] = True
-            st.rerun()
-        else:
-            st.error("Грешна парола.")
+        if st.form_submit_button("Вход"):
+            if pwd == expected:
+                st.session_state["auth_ok"] = True
+                st.rerun()
+            else:
+                st.error("Грешна парола.")
     st.stop()
 
 
@@ -79,313 +71,155 @@ def get_weather():
         return pd.DataFrame()
 
 
-def chart(fig, height: int = 340):
+def _refresh():
+    get_data.clear(); get_costs.clear(); st.rerun()
+
+
+def chart(fig, height=320):
     st.plotly_chart(theme.style_fig(fig, height), use_container_width=True,
                     config={"displayModeBar": False})
 
 
-def weather_chart(merged):
-    """Оборот (стълбове) и максимална температура (линия) по ден, две оси Y."""
-    fig = make_subplots(specs=[[{"secondary_y": True}]])
-    fig.add_bar(x=merged["day"], y=merged["revenue"], name="Оборот",
-                marker_color=theme.ACCENT)
-    fig.add_scatter(x=merged["day"], y=merged["temp_max"], name="Макс. температура",
-                    mode="lines+markers", line=dict(color=theme.CHART_COLORS[1]),
-                    secondary_y=True)
-    theme.style_fig(fig, 360)
-    fig.update_yaxes(title_text="°C", secondary_y=True, showgrid=False)
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+def _orders(d):
+    return int(d["order_no"].nunique()) if "order_no" in d and d["order_no"].notna().any() else len(d)
 
 
-st.markdown(
-    theme.header_html("Призма", "Анализ на продажби, печалба и прогнози"),
-    unsafe_allow_html=True,
-)
+def _kpis(d):
+    total = float(pd.to_numeric(d["amount"], errors="coerce").sum())
+    n = _orders(d)
+    avg = total / n if n else 0.0
+    deliv = float(pd.to_numeric(d.loc[d["is_delivery"], "amount"], errors="coerce").sum()) if "is_delivery" in d else 0.0
+    dshare = deliv / total * 100 if total else 0.0
+    return total, n, avg, dshare
+
+
+def _pct(cur, prev):
+    return (cur - prev) / prev * 100 if prev else None
+
 
 df_all = get_data()
 costs = get_costs()
-
 has_data = not df_all.empty
 
-# --- Филтър по обект (важи за таблото и чата, не за управлението на цените) ---
-if has_data:
-    objects = ["Всички обекти"] + sorted(df_all["object_name"].dropna().unique().tolist())
-    chosen = st.sidebar.selectbox("Обект", objects)
-    df = df_all if chosen == "Всички обекти" else df_all[df_all["object_name"] == chosen]
-else:
-    chosen = "Всички обекти"
-    df = df_all
+# ===== Странична лента =====
+with st.sidebar:
+    st.markdown('<div class="pz-brand">Призма<small>АНАЛИЗИ</small></div>',
+                unsafe_allow_html=True)
+    st.write("")
+    NAV = ["Табло", "AI Чат", "Метрики", "Прогнози", "Сегменти", "Качи данни"]
+    nav = st.radio("Навигация", NAV, label_visibility="collapsed")
+    st.divider()
+    if has_data:
+        objects = ["Всички обекти"] + sorted(df_all["object_name"].dropna().unique().tolist())
+        chosen = st.selectbox("Обект", objects)
+    else:
+        chosen = "Всички обекти"
 
-tab_dash, tab_sales, tab_costs, tab_chat = st.tabs(
-    ["Табло", "Продажби", "Себестойности", "Чат асистент"]
-)
+df = df_all if chosen == "Всички обекти" else df_all[df_all["object_name"] == chosen]
 
-with tab_dash:
-  if not has_data:
-    st.info("Все още няма данни. Качи продажби от таб Продажби, за да се появи таблото.")
-  else:
-    deliv = metrics.delivery_split(df)
-    deliv_rev = float(deliv.loc[deliv["channel"] == "Доставка", "revenue"].sum())
-    total = metrics.total_revenue(df)
 
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Общ оборот", f"{total:,.2f} лв.")
-    c2.metric("Ръст (последен ден)", f"{metrics.growth_rate(df):+.1f}%")
-    c3.metric("Дял доставки", f"{(deliv_rev / total * 100) if total else 0:.0f}%")
+def period_filter(d):
+    """Лента с период (по референтна дата = последния работен ден в данните)."""
+    opts = {"7 дни": 7, "30 дни": 30, "90 дни": 90, "12 мес": 365}
+    sel = st.radio("Период", list(opts), index=2, horizontal=True,
+                   label_visibility="collapsed")
+    days = opts[sel]
+    bdate = pd.to_datetime(d["business_date"], errors="coerce")
+    if bdate.notna().any():
+        end = bdate.max()
+        cur = d[bdate > end - pd.Timedelta(days=days)]
+        prev = d[(bdate <= end - pd.Timedelta(days=days)) &
+                 (bdate > end - pd.Timedelta(days=2 * days))]
+        return cur, prev, sel
+    return d, d.iloc[0:0], sel
 
-    st.subheader("Оборот по работен ден и прогноза")
-    fc = forecast_revenue(df, days=7)
-    chart(px.line(fc, x="business_date", y="revenue", color="kind", markers=True), 360)
 
-    col_a, col_b = st.columns(2)
-    with col_a:
-        st.subheader("Оборот по час")
-        chart(px.bar(metrics.revenue_by_hour(df), x="sale_hour", y="revenue"))
-        st.subheader("На място спрямо доставка")
-        chart(px.pie(deliv, values="revenue", names="channel", hole=0.55))
-    with col_b:
+def greeting():
+    hr = dt.datetime.now().hour
+    g = "Добро утро" if hr < 12 else ("Добър ден" if hr < 18 else "Добра вечер")
+    return g
+
+
+# ===== Без данни (освен на „Качи данни") =====
+if not has_data and nav != "Качи данни":
+    st.markdown(theme.header_html("Призма", "Анализ на продажби, печалба и прогнози"),
+                unsafe_allow_html=True)
+    st.info("Все още няма данни. Отвори раздел Качи данни от менюто и качи продажби.")
+    st.stop()
+
+
+# ===== ТАБЛО =====
+if nav == "Табло":
+    cur, prev, sel = period_filter(df)
+    st.markdown(f'<div class="pz-hello">{greeting()}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="pz-sub">Преглед за продажби и операции · {sel} · '
+                f'спрямо предходен период</div>', unsafe_allow_html=True)
+
+    t, n, avg, ds = _kpis(cur)
+    pt, pn, pavg, pds = _kpis(prev)
+    spark = metrics.revenue_by_business_day(cur)["revenue"].tail(30).tolist()
+    cards = [
+        prizma.kpi_card("Приходи", f"€{t:,.0f}".replace(",", " "), _pct(t, pt), spark),
+        prizma.kpi_card("Поръчки", f"{n:,}".replace(",", " "), _pct(n, pn), spark),
+        prizma.kpi_card("Среден чек", f"€{avg:,.0f}".replace(",", " "), _pct(avg, pavg), spark),
+        prizma.kpi_card("Дял доставки", f"{ds:.0f}%", _pct(ds, pds), spark,
+                        theme.CHART_COLORS[1]),
+    ]
+    st.markdown(prizma.kpi_row(cards), unsafe_allow_html=True)
+
+    c1, c2 = st.columns([3, 2])
+    with c1:
+        st.subheader("Приходи · тренд")
+        fc = forecast_revenue(cur, days=7)
+        chart(px.line(fc, x="business_date", y="revenue", color="kind", markers=True), 330)
+    with c2:
+        st.subheader("Канали")
+        deliv = metrics.delivery_split(cur)
+        chart(px.pie(deliv, values="revenue", names="channel", hole=0.6), 250)
+
+    c3, c4 = st.columns(2)
+    with c3:
         st.subheader("Топ продукти")
-        chart(px.bar(metrics.top_products(df), x="revenue", y="product_name",
-                     orientation="h"))
-        st.subheader("Оборот по категория")
-        chart(px.bar(metrics.revenue_by_category(df), x="revenue", y="category",
-                     orientation="h"))
+        st.markdown(prizma.top_list(metrics.top_products(cur), "product_name", "revenue"),
+                    unsafe_allow_html=True)
+    with c4:
+        st.subheader("AI инсайти")
+        ins = []
+        obj = metrics.revenue_by_object(cur)
+        if not obj.empty:
+            ins.append(("pos", f"Най-силен обект: {obj.iloc[0]['object_name']} "
+                               f"({obj.iloc[0]['revenue']:,.0f} лв.)"))
+        cat = metrics.revenue_by_category(cur)
+        if not cat.empty:
+            ins.append(("info", f"Водеща категория: {cat.iloc[0]['category']}"))
+        ins.append(("warn" if ds < 25 else "pos",
+                    f"Доставките са {ds:.0f}% от оборота"))
+        miss = metrics.missing_costs(cur, costs)
+        if not miss.empty:
+            ins.append(("neg", f"{len(miss)} продукта без себестойност — печалбата е неточна"))
+        st.markdown(prizma.insights(ins), unsafe_allow_html=True)
 
-    if not costs.empty:
-        st.subheader("Печалба по продукт")
-        st.dataframe(metrics.profit_by_product(df, costs), use_container_width=True,
-                     hide_index=True)
-
-    # --- Време и оборот (следва избрания обект) ---
-    st.subheader("Време и оборот")
-    if chosen != "Всички обекти":
-        # Времето следва региона на избрания обект (София -> София и т.н.)
-        city = config.city_for(chosen)
-        sales_for_corr = df  # оборотът на самия обект
-        if city:
-            st.caption(f"Регион на обекта: {city}")
-        else:
-            st.info("За този обект няма зададен регион.")
-    else:
-        cities = sorted(set(config.OBJECT_CITY.values()))
-        city = st.selectbox("Град", cities, key="weather_city")
-        in_city = df_all["object_name"].map(lambda n: config.city_for(n) == city)
-        sales_for_corr = df_all[in_city]
-
-    if has_service_key():
-        if st.button("Обнови времето", key="weather_refresh"):
-            with st.spinner("Дърпам времето от Open-Meteo..."):
-                try:
-                    bdates = df_all["business_date"].dropna()
-                    start = min(bdates) if len(bdates) else None
-                    end = dt.date.today() + dt.timedelta(days=14)
-                    n = weather_ingest.load_weather(start=start, end=end)
-                    st.success(f"Обновени {n} реда за времето.")
-                    get_weather.clear()
-                    st.rerun()
-                except Exception as e:  # noqa: BLE001
-                    st.error(f"Проблем с Open-Meteo: {e}")
-
-    weather_all = get_weather()
-    wcity = (weather_all[weather_all["city"] == city]
-             if city and not weather_all.empty else weather_all.iloc[0:0])
-    if city and wcity.empty:
-        st.info("Няма данни за времето за този регион. Натисни Обнови времето.")
-    elif city:
-        daily = metrics.revenue_by_business_day(sales_for_corr)
-        merged = correlate_with_sales(daily, wcity)
-        if merged.empty:
-            st.info("Няма припокриване между продажбите и времето.")
-        else:
-            ct, cr = merged.attrs.get("corr_temp"), merged.attrs.get("corr_rain")
-            m1, m2 = st.columns(2)
-            m1.metric("Корелация с температурата",
-                      f"{ct:+.2f}" if ct is not None and ct == ct else "—",
-                      help="От -1 до +1. Положително = повече оборот при по-топло.")
-            m2.metric("Корелация с валежите",
-                      f"{cr:+.2f}" if cr is not None and cr == cr else "—",
-                      help="Положително = повече оборот при дъжд (напр. доставки).")
-            weather_chart(merged.sort_values("day"))
-
-
-def _refresh():
-    """Изчиства кеша и презарежда, за да се видят новокачените данни."""
-    get_data.clear()
-    get_costs.clear()
-    st.rerun()
-
-
-with tab_sales:
-    can_write = has_service_key()
-    if not can_write:
-        st.warning(
-            "За качване е нужен service_role ключ. Добави `SUPABASE_SERVICE_KEY` "
-            "в Streamlit secrets (при деплой) или в `.env` (локално). Без него "
-            "можеш само да преглеждаш данните."
-        )
-
-    st.subheader("Качване на продажби")
-    st.caption(
-        "Суров експорт от касовата система (Oбект, Номер, Дата и час, Мат. №, "
-        "Стойност, Партньор...). Файлът се обработва автоматично — работен ден, "
-        "доставка, връщане."
-    )
-    up = st.file_uploader("Избери .xlsx файл", type=["xlsx"], key="sales_upload")
-    if up is not None:
-        try:
-            parsed = read_sales_excel(up)
-            bdates = parsed["business_date"].dropna()
-            period = f"{bdates.min()} – {bdates.max()}" if not bdates.empty else "—"
-            st.write(f"Разпознати **{len(parsed)}** реда · работни дни: **{period}**")
-            st.dataframe(parsed.head(50), use_container_width=True, hide_index=True)
-
-            mode = st.radio(
-                "Режим на качване",
-                ["Добави към съществуващите", "Замести всички продажби"],
-                help=(
-                    "„Добави\" вкарва редовете към текущите (внимавай с дубликати "
-                    "при повторно качване на същия файл). „Замести\" първо изтрива "
-                    "всички стари продажби, после вкарва тези."
-                ),
-            )
-            replace = mode.startswith("Замести")
-            confirm = True
-            if replace:
-                confirm = st.checkbox(
-                    "Потвърждавам, че ще изтрия всички досегашни продажби", value=False
-                )
-
-            if st.button("Качи в Supabase", type="primary",
-                         disabled=not (can_write and confirm), key="sales_upload_btn"):
-                with st.spinner("Качвам..."):
-                    n = replace_all_sales(parsed) if replace else insert_sales(parsed)
-                st.success(f"Готово. {'Заменени' if replace else 'Добавени'} {n} реда.")
-                _refresh()
-        except Exception as e:  # noqa: BLE001
-            st.error(f"Проблем с файла или качването: {e}")
-
-
-with tab_costs:
-    can_write = has_service_key()
-    if not can_write:
-        st.warning(
-            "За качване и редакция е нужен service_role ключ "
-            "(`SUPABASE_SERVICE_KEY`). Без него можеш само да преглеждаш."
-        )
-
-    st.subheader("Продукти без себестойност")
-    missing = metrics.missing_costs(df_all, costs) if has_data else costs.iloc[0:0]
-    if not has_data:
-        st.caption("Ще се покаже след като качиш продажби.")
-    elif missing.empty:
-        st.success("Всички продавани продукти имат себестойност.")
-    else:
-        st.caption(
-            f"{len(missing)} комбинации продукт и канал нямат себестойност — "
-            "печалбата им излиза подвеждащо висока. Добави ги в таблицата по-долу."
-        )
-        st.dataframe(missing, use_container_width=True, hide_index=True)
-
-    st.divider()
-
-    st.subheader("Качване на себестойности")
-    st.caption(
-        "Файл с лист Обекти (на място) и лист Доставки — колони Артикул и "
-        "Обща стойност с ДДС."
-    )
-    up = st.file_uploader("Избери .xlsx файл", type=["xlsx"], key="costs_upload")
-    if up is not None:
-        try:
-            parsed = read_costs_excel(up)
-            st.write(f"Разпознати **{len(parsed)}** реда:")
-            st.dataframe(parsed, use_container_width=True, hide_index=True, height=240)
-            if st.button("Качи в Supabase", type="primary", disabled=not can_write):
-                with st.spinner("Качвам..."):
-                    n = upsert_costs(parsed)
-                st.success(f"Качени или обновени {n} реда.")
-                _refresh()
-        except Exception as e:  # noqa: BLE001
-            st.error(f"Проблем с файла: {e}")
-
-    st.divider()
-
-    st.subheader("Редакция на себестойностите")
-    base = costs.copy()
-    if base.empty:
-        base = pd.DataFrame(columns=["product_name", "channel", "unit_cost"])
-    edited = st.data_editor(
-        base[["product_name", "channel", "unit_cost"]] if not base.empty else base,
-        num_rows="dynamic",
-        use_container_width=True,
-        hide_index=True,
-        disabled=not can_write,
-        column_config={
-            "product_name": st.column_config.TextColumn("Продукт", required=True),
-            "channel": st.column_config.SelectboxColumn(
-                "Канал", options=["onsite", "delivery"], required=True
-            ),
-            "unit_cost": st.column_config.NumberColumn(
-                "Себестойност", min_value=0.0, step=0.01, format="%.4f"
-            ),
-        },
-        key="costs_editor",
-    )
-    if st.button("Запази промените", type="primary", disabled=not can_write):
-        clean = edited.copy()
-        clean["product_name"] = clean["product_name"].astype(str).str.strip()
-        clean = clean[
-            (clean["product_name"] != "")
-            & clean["channel"].isin(["onsite", "delivery"])
-        ]
-        clean["unit_cost"] = pd.to_numeric(clean["unit_cost"], errors="coerce")
-        clean = clean.drop_duplicates(subset=["product_name", "channel"], keep="last")
-        clean["updated_at"] = pd.Timestamp.now(tz="UTC").isoformat()
-        if clean.empty:
-            st.warning("Няма валидни редове за запис.")
-        else:
-            try:
-                with st.spinner("Запазвам..."):
-                    n = upsert_costs(clean)
-                st.success(f"Запазени {n} реда.")
-                _refresh()
-            except Exception as e:  # noqa: BLE001
-                st.error(f"Проблем при запис: {e}")
-
-
-with tab_chat:
-    st.subheader("Чат асистент")
-    st.caption(
-        "Питай на естествен език за продажбите, доставките, маркетинга и "
-        "прогнозите. Отговорите се смятат от реалните данни."
-    )
-    if not has_data:
-        st.info("Качи продажби, за да може асистентът да анализира данните.")
-        st.stop()
+# ===== AI ЧАТ =====
+elif nav == "AI Чат":
+    st.markdown('<div class="pz-hello">AI Чат</div>', unsafe_allow_html=True)
+    st.markdown('<div class="pz-sub">Питай за приходите, обектите, продуктите, '
+                'прогнозите и времето — отговарям с реалните числа.</div>',
+                unsafe_allow_html=True)
     if not has_secret("OPENAI_API_KEY"):
-        st.info(
-            "Чатът иска `OPENAI_API_KEY` в Streamlit secrets или `.env`, за да "
-            "отговаря. Таблото и качването работят и без него."
-        )
-
+        st.info("Чатът иска `OPENAI_API_KEY` в Streamlit secrets, за да отговаря.")
     if "history" not in st.session_state:
         st.session_state.history = []
-
-    examples = [
-        "Кой е най-печелившият продукт?",
-        "Как вървят доставките спрямо на място?",
-        "Какъв оборот да очаквам следващата седмица?",
-    ]
+    examples = ["Кой обект е най-силен?", "Кои дни от седмицата водят?",
+                "Какъв оборот да очаквам?", "При дъжд какво става с доставките?"]
     if not st.session_state.history:
         cols = st.columns(len(examples))
         for col, q in zip(cols, examples):
             if col.button(q, key="ex_" + q, use_container_width=True):
                 st.session_state.pending = q
                 st.rerun()
-
     for m in st.session_state.history:
         st.chat_message(m["role"]).write(m["content"])
-
-    typed = st.chat_input("Напиши въпрос...")
+    typed = st.chat_input("Питай за данните си...")
     question = typed or st.session_state.pop("pending", None)
     if question:
         st.chat_message("user").write(question)
@@ -394,10 +228,151 @@ with tab_chat:
             with st.spinner("Анализирам..."):
                 try:
                     from bot.assistant import ask
-
-                    answer = ask(question, df_all, costs, st.session_state.history[:-1],
-                                 weather=get_weather())
+                    answer = ask(question, df_all, costs,
+                                 st.session_state.history[:-1], weather=get_weather())
                 except Exception as e:  # noqa: BLE001
                     answer = f"Не успях да отговоря: {e}"
             st.write(answer)
         st.session_state.history.append({"role": "assistant", "content": answer})
+
+# ===== МЕТРИКИ =====
+elif nav == "Метрики":
+    cur, prev, sel = period_filter(df)
+    st.markdown('<div class="pz-hello">Детайлен анализ</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="pz-sub">Разбивки · {sel}</div>', unsafe_allow_html=True)
+    a, b = st.columns(2)
+    with a:
+        st.subheader("Оборот по час")
+        chart(px.bar(metrics.revenue_by_hour(cur), x="sale_hour", y="revenue"))
+        st.subheader("Оборот по обект")
+        chart(px.bar(metrics.revenue_by_object(cur), x="revenue", y="object_name",
+                     orientation="h"), 380)
+    with b:
+        st.subheader("Оборот по категория")
+        chart(px.bar(metrics.revenue_by_category(cur), x="revenue", y="category",
+                     orientation="h"))
+        st.subheader("На място спрямо доставка")
+        chart(px.pie(metrics.delivery_split(cur), values="revenue", names="channel",
+                     hole=0.6), 280)
+    if not costs.empty:
+        st.subheader("Печалба по продукт")
+        st.dataframe(metrics.profit_by_product(cur, costs), use_container_width=True,
+                     hide_index=True)
+
+# ===== ПРОГНОЗИ =====
+elif nav == "Прогнози":
+    st.markdown('<div class="pz-hello">Прогнози и сценарии</div>', unsafe_allow_html=True)
+    st.markdown('<div class="pz-sub">Тренд и очаквания за следващите дни</div>',
+                unsafe_allow_html=True)
+    scenario = st.radio("Сценарий", ["Оптимистичен", "Базов", "Консервативен"],
+                        index=1, horizontal=True, label_visibility="collapsed")
+    factor = {"Оптимистичен": 1.1, "Базов": 1.0, "Консервативен": 0.9}[scenario]
+    fc = forecast_revenue(df, days=14).copy()
+    fc.loc[fc["kind"] == "forecast", "revenue"] *= factor
+    chart(px.line(fc, x="business_date", y="revenue", color="kind", markers=True), 360)
+    fut = fc[fc["kind"] == "forecast"]["revenue"].sum()
+    k1, k2, k3 = st.columns(3)
+    k1.metric("Прогноза (14 дни)", f"{fut:,.0f} лв.")
+    k2.metric("Сценарий", scenario)
+    k3.metric("Дневен ръст", f"{metrics.growth_rate(df):+.1f}%")
+
+    st.subheader("Време и оборот")
+    if chosen != "Всички обекти":
+        city = config.city_for(chosen)
+        sales_for_corr = df
+        st.caption(f"Регион на обекта: {city}" if city else "Няма зададен регион.")
+    else:
+        cities = sorted(set(config.OBJECT_CITY.values()))
+        city = st.selectbox("Град", cities, key="weather_city")
+        sales_for_corr = df_all[df_all["object_name"].map(lambda n: config.city_for(n) == city)]
+    if has_service_key() and st.button("Обнови времето"):
+        with st.spinner("Дърпам времето от Open-Meteo..."):
+            try:
+                bd = df_all["business_date"].dropna()
+                n = weather_ingest.load_weather(start=min(bd) if len(bd) else None,
+                                                end=dt.date.today() + dt.timedelta(days=14))
+                st.success(f"Обновени {n} реда."); get_weather.clear(); st.rerun()
+            except Exception as e:  # noqa: BLE001
+                st.error(f"Проблем с Open-Meteo: {e}")
+    wall = get_weather()
+    wcity = wall[wall["city"] == city] if city and not wall.empty else wall.iloc[0:0]
+    if city and not wcity.empty:
+        merged = correlate_with_sales(metrics.revenue_by_business_day(sales_for_corr), wcity)
+        if not merged.empty:
+            ct, cr = merged.attrs.get("corr_temp"), merged.attrs.get("corr_rain")
+            w1, w2 = st.columns(2)
+            w1.metric("Корелация с температурата",
+                      f"{ct:+.2f}" if ct is not None and ct == ct else "—")
+            w2.metric("Корелация с валежите",
+                      f"{cr:+.2f}" if cr is not None and cr == cr else "—")
+            fig = make_subplots(specs=[[{"secondary_y": True}]])
+            m = merged.sort_values("day")
+            fig.add_bar(x=m["day"], y=m["revenue"], name="Оборот", marker_color=theme.ACCENT)
+            fig.add_scatter(x=m["day"], y=m["temp_max"], name="Макс. темп.",
+                            mode="lines+markers", line=dict(color=theme.CHART_COLORS[1]),
+                            secondary_y=True)
+            theme.style_fig(fig, 340)
+            fig.update_yaxes(title_text="°C", secondary_y=True, showgrid=False)
+            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+    elif city:
+        st.info("Няма данни за времето за този регион. Натисни Обнови времето.")
+
+# ===== СЕГМЕНТИ (по обект/регион) =====
+elif nav == "Сегменти":
+    cur, prev, sel = period_filter(df)
+    st.markdown('<div class="pz-hello">Сегменти</div>', unsafe_allow_html=True)
+    st.markdown('<div class="pz-sub">По обекти и региони · '
+                'нямаме клиентски данни, затова сегментираме обектите</div>',
+                unsafe_allow_html=True)
+    obj = metrics.revenue_by_object(cur)
+    a, b = st.columns([3, 2])
+    with a:
+        st.subheader("Оборот по обект")
+        chart(px.bar(obj, x="revenue", y="object_name", orientation="h"), 460)
+    with b:
+        st.subheader("По регион")
+        reg = cur.copy()
+        reg["region"] = reg["object_name"].map(config.city_for)
+        rg = reg.groupby("region")["amount"].sum().sort_values(ascending=False).reset_index(name="revenue")
+        chart(px.pie(rg, values="revenue", names="region", hole=0.6), 320)
+
+# ===== КАЧИ ДАННИ =====
+elif nav == "Качи данни":
+    st.markdown('<div class="pz-hello">Качи данни</div>', unsafe_allow_html=True)
+    can_write = has_service_key()
+    if not can_write:
+        st.warning("За качване е нужен `SUPABASE_SERVICE_KEY` в Streamlit secrets.")
+    st.subheader("Продажби")
+    up = st.file_uploader("Excel с продажби", type=["xlsx"], key="sales_up")
+    if up is not None:
+        try:
+            parsed = read_sales_excel(up)
+            st.write(f"Разпознати {len(parsed)} реда.")
+            mode = st.radio("Режим", ["Добави", "Замести всички"], horizontal=True)
+            replace = mode.startswith("Замести")
+            ok = st.checkbox("Потвърждавам изтриването", value=False) if replace else True
+            if st.button("Качи продажби", type="primary", disabled=not (can_write and ok)):
+                with st.spinner("Качвам..."):
+                    nrec = replace_all_sales(parsed) if replace else insert_sales(parsed)
+                st.success(f"Готово: {nrec} реда."); _refresh()
+        except Exception as e:  # noqa: BLE001
+            st.error(f"Проблем: {e}")
+
+    st.divider()
+    st.subheader("Себестойности")
+    if has_data:
+        miss = metrics.missing_costs(df_all, costs)
+        if not miss.empty:
+            st.caption(f"{len(miss)} продукта без себестойност:")
+            st.dataframe(miss, use_container_width=True, hide_index=True, height=180)
+    upc = st.file_uploader("Excel със себестойности", type=["xlsx"], key="costs_up")
+    if upc is not None:
+        try:
+            parsed = read_costs_excel(upc)
+            st.write(f"Разпознати {len(parsed)} реда.")
+            if st.button("Качи себестойности", type="primary", disabled=not can_write):
+                with st.spinner("Качвам..."):
+                    nrec = upsert_costs(parsed)
+                st.success(f"Готово: {nrec} реда."); _refresh()
+        except Exception as e:  # noqa: BLE001
+            st.error(f"Проблем: {e}")

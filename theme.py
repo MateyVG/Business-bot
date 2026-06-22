@@ -103,6 +103,59 @@ h1, h2, h3 {{ color: {TEXT}; letter-spacing: -0.01em; }}
 [data-testid="stFileUploaderDropzone"] {{ border-radius: 12px; border: 1.5px dashed {BORDER};
   background: {SURFACE}; }}
 hr {{ border-color: {BORDER}; }}
+
+/* ===== Скелет „Призма" ===== */
+/* Тъмна странична лента */
+[data-testid="stSidebar"] {{ background: #181a14; }}
+[data-testid="stSidebar"] * {{ color: #e8e7e1 !important; }}
+[data-testid="stSidebar"] [role="radiogroup"] {{ gap: 2px; }}
+[data-testid="stSidebar"] [role="radiogroup"] label {{
+  display: flex; align-items: center; padding: 9px 12px; border-radius: 10px;
+  margin: 1px 0; cursor: pointer; transition: background .12s ease;
+}}
+[data-testid="stSidebar"] [role="radiogroup"] label:hover {{ background: rgba(255,255,255,.06); }}
+[data-testid="stSidebar"] [role="radiogroup"] label[data-checked="true"],
+[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) {{
+  background: rgba(47,122,111,.22); box-shadow: inset 2.5px 0 0 {ACCENT};
+}}
+[data-testid="stSidebar"] [role="radiogroup"] div[data-testid="stMarkdownContainer"] {{ font-weight: 600; }}
+.pz-brand {{ font-size: 1.4rem; font-weight: 800; color: #fff !important; }}
+.pz-brand small {{ display:block; font-size:.62rem; letter-spacing:.18em;
+  color:#9aa08f !important; font-weight:700; margin-top:2px; }}
+
+/* Поздрав */
+.pz-hello {{ font-size: 1.7rem; font-weight: 800; color: {TEXT}; margin: 2px 0 2px; }}
+.pz-sub {{ color: {MUTED}; font-size: .92rem; margin-bottom: 14px; }}
+
+/* KPI карти */
+.pz-kpis {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 16px; }}
+.pz-kpi {{ background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 16px;
+  padding: 14px 16px; box-shadow: 0 4px 16px rgba(0,0,0,.04); }}
+.pz-kpi-top {{ display:flex; justify-content:space-between; align-items:center; }}
+.pz-kpi-label {{ color:{MUTED}; font-size:.72rem; font-weight:700; letter-spacing:.08em;
+  text-transform:uppercase; }}
+.pz-kpi-value {{ font-size:1.55rem; font-weight:800; color:{TEXT}; margin:6px 0 2px; }}
+.pz-kpi-spark {{ margin-top:4px; }}
+
+/* Карти */
+.pz-card {{ background:{SURFACE}; border:1px solid {BORDER}; border-radius:16px;
+  padding:16px 18px; box-shadow:0 4px 16px rgba(0,0,0,.04); margin-bottom:16px; }}
+.pz-card-title {{ font-size:.72rem; font-weight:700; letter-spacing:.08em;
+  text-transform:uppercase; color:{MUTED}; display:flex; justify-content:space-between; }}
+.pz-card-value {{ color:{TEXT}; font-size:1.2rem; font-weight:800; letter-spacing:0; text-transform:none; }}
+
+/* Списък топ + барове */
+.pz-row {{ margin:9px 0; }}
+.pz-row-top {{ display:flex; justify-content:space-between; font-size:.9rem; color:{TEXT}; }}
+.pz-bar {{ height:6px; background:#efece4; border-radius:999px; margin-top:5px; overflow:hidden; }}
+.pz-bar-fill {{ height:100%; background:{ACCENT}; border-radius:999px; }}
+
+/* Инсайти */
+.pz-insight {{ display:flex; gap:9px; align-items:flex-start; padding:8px 0;
+  border-bottom:1px solid {BORDER}; font-size:.9rem; color:{TEXT}; }}
+.pz-insight:last-child {{ border-bottom:none; }}
+.pz-dot {{ width:8px; height:8px; border-radius:50%; margin-top:6px; flex:0 0 auto; }}
+.pz-muted {{ color:{MUTED}; font-size:.9rem; }}
 </style>
 """
 
