@@ -59,7 +59,7 @@ def kpi_row(cards: list[str]) -> str:
 
 
 def top_list(df: pd.DataFrame, label_col: str, value_col: str,
-             unit: str = "лв.", n: int = 6) -> str:
+             unit: str = "€", n: int = 6) -> str:
     if df.empty:
         return '<div class="pz-muted">Няма данни.</div>'
     d = df.head(n)
@@ -67,9 +67,10 @@ def top_list(df: pd.DataFrame, label_col: str, value_col: str,
     rows = []
     for _, r in d.iterrows():
         pct = max(4, float(r[value_col]) / mx * 100)
+        val = f"€{r[value_col]:,.0f}".replace(",", " ")
         rows.append(
             f'<div class="pz-row"><div class="pz-row-top">'
-            f'<span>{r[label_col]}</span><b>{r[value_col]:,.0f} {unit}</b></div>'
+            f'<span>{r[label_col]}</span><b>{val}</b></div>'
             f'<div class="pz-bar"><div class="pz-bar-fill" style="width:{pct:.0f}%"></div></div></div>'
         )
     return "".join(rows)
